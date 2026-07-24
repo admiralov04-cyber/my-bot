@@ -1,4 +1,13 @@
-import sqlite3  # Для работы с базой данных SQLite
+# ⚙️ Загрузка токена из системной переменной API_TOKEN (Bothost создаёт её автоматически).
+import os
+TOKEN = os.getenv("API_TOKEN")
+if not TOKEN:
+    raise ValueError(
+        "🛑 Ошибка! Переменная окружения API_TOKEN не найдена."
+        "\nПроверьте настройки вашего сервера."
+    )
+
+import sqlite3 # Для работы с базой данных SQLite
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -17,16 +26,6 @@ DB_NAME = "casino.db"
 DAILY_START = 10_000   # Начальный бонус за день
 DAILY_INCREMENT = 10_000  # Прибавка за каждый пропущенный день
 
-# ⚙️ Загрузка токена из системной переменной API_TOKEN (Bothost создаёт её автоматически).
-# Вы можете создать свою переменную TELEGRAM_TOKEN через панель управления.
-import os
-TOKEN = os.getenv("API_TOKEN")  # <--- ВАЖНО: проверьте это значение!
-if not TOKEN:
-    raise ValueError(
-        "🛑 Ошибка! Переменная окружения API_TOKEN не найдена."
-        "\nПроверьте настройки вашего сервера."
-    )
-
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -34,7 +33,7 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Таблица пользователей
+    # Основная таблица пользователей
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -44,7 +43,7 @@ def init_db():
         );
     ''')
     
-    # Магазин предметов
+    # Таблица магазина предметов
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shop (
             item_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,12 +53,12 @@ def init_db():
         );
     ''')
     
-    # Заполнение магазина базовыми предметами, если он пуст
+    # Заполним магазин базовыми предметами, если он пуст
     if cursor.execute('SELECT COUNT(*) FROM shop').fetchone()[0] == 0:
         items = [
             ('Счастливая монета', 50_000, '🎲 Увеличивает шанс выигрыша'),
             ('Удвоитель опыта', 75_000, '💸 Временное удвоение всех выигрышей'),
-            ('VIP-статус', 200_000, '🔑 Открывает эксклюзивные игры')
+            ('VIP-статус', 200_000, '🔑 Открывает эксклюзивные игры'),
         ]
         cursor.executemany('INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', items)
         
@@ -133,7 +132,8 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
     try:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_mark__markup=reply_markup)
+        # Исправлена ошибка с двойным подчёркиванием!
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
         print(e)
 
@@ -150,7 +150,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         case 'balance':
             user_data = await get_user(update)
-            await query.edit_message_text(
+            await query.edit_message_text(  # edit_, так как это колбек
                 text=f"Твой текущий баланс: *{user_data['balance']:,}* 🪙",
                 parse_mode="Markdown"
             )
@@ -180,8 +180,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }[query.data]
 
             msg = f"Введите сумму ставки для игры \"*{game_name}*\":\n\n" \
-                  f"(текущий баланс: *(await get_user(update)['balance']:,)* 🪙)"
-            await query.edit_message_text(msg, parse_mode="Markdown")
+                  f"(текущий баланс: *(await get_user(update))['balance']:,)* 🪙)"
+            await query.edit_message_text(msg, parse_mode="Markdown") # Без клавиатуры
             # Сохраняем выбранную игру в контекст, чтобы потом её обработать
             context.user_data['selected_game'] = query.data
 
@@ -204,18 +204,19 @@ async def cancel_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def main_menu_from_callback(query):
-    """Показывает главное меню после коллбека."""
+    """Показать главное меню из коллбека (без message object)"""
     user_data = await get_user(update=query)
     keyboard = [
         [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
         [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
         [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
-        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
+        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='dayli')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{query.from_user.first_name}*!\nВыбери действие:"
+    # Исправлено на edit_message_text — иначе будет ошибка при перезапуске бота
     await query.edit_message_text(
-        text=text, parse_mode="Markdown", reply_markup=reply_markup
+        text=text, parse_mode="Markdown", reply_markup=reply_markup  
     )
 
 
@@ -257,7 +258,7 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
     new_balance = user_data['balance'] + bonus
 
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    cursor = conn.conn.cursor()
     cursor.execute(
         'UPDATE users SET balance = ?, last_daily = ? WHERE user_id = ?',
         (new_balance, today.isoformat(), user.id))
@@ -267,6 +268,37 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         f"✅ Успех! Вы забрали бонус за {days_passed} день/дня: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
         parse_mode="Markdown"
+    )
+
+
+# --- ПОКАЗАТЬ МАГАЗИН ---
+
+async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    # Собираем кнопки товаров
+    buttons = []
+    for row in cur.execute("SELECT item_id, name, price FROM shop"):
+        item_id, name, _price = row
+        buttons.append([InlineKeyboardButton(name, callback_data=f"buy_{item_id}")])
+
+    # Добавляем кнопку возврата
+    buttons.append(
+        [InlineKeyboardButton('↩️ Назад', callback_data='mainmenu')]
+    )
+
+    # Формируем текст со списком товаров
+    text = "*🛍 Добро пожаловать в магазин:*\n"
+    for name, price, desc in cur.execute("SELECT name, price, description FROM shop"):
+        text += f"\n• {name}\nЦена: {price:,} 🪙\n{desc}"
+
+    conn.close()
+
+    await query.edit_message_text(
+        text=text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons),
     )
 
 
@@ -330,7 +362,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Считаем новый баланс
     new_balance = user_data['balance'] + win_amount - bet
 
-    await save_balance(user.id, new_balance)
+    await save_balance(update.effective_user.id, new_balance)
 
     summary = (
         f"{result_msg}\n\n{'+' if win_amount > 0 else '-'}{abs(win_amount - bet):,} 🪙\nВаш новый баланс: *{new_balance:,}* 🪙"
