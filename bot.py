@@ -29,7 +29,7 @@ if not TOKEN:
 
 # --- НАСТРОЙКИ ---
 DB_NAME = "casino.db"
-DAILY_START = 10_000  # Начальный бонус за день
+DAILY_START = 10_000   # Начальный бонус за день
 DAILY_INCREMENT = 10_000  # Прибавка за каждый пропущенный день
 
 
@@ -74,12 +74,13 @@ def init_db():
     conn.close()
 
 
-async def get_user(update: Update):
+async def get_user(update):
     """
     Получаем данные пользователя из базы.
     Регистрирует нового игрока, если его нет.
     Возвращает ВСЕ поля пользователя.
     """
+    # Теперь всегда передаётся полный объект update!
     user = update.effective_user
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -129,7 +130,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню с кнопками."""
-    user_data = await get_user(update)
+    user_data = await get_user(update=update)
 
     keyboard = [
         [InlineKeyboardButton(f"💰 Баланс: {user_data['balance']:,} 🪙", callback_data="balance")],
@@ -169,29 +170,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     match query.data:
         case "mainmenu":
-            # Переход в главное меню из любой точки
             await main_menu(update, context)
 
         case "balance":
-            user_data = await get_user(update)
+            user_data = await get_user(update=update) # Передаём полное обновление
             await query.edit_message_text(
                 text=f"Твой текущий баланс: *{user_data['balance']:,}* 🪙",
                 parse_mode="Markdown",
             )
 
+        # ❗️ Фикс: вместо вызова несуществующей show_casino добавляем нашу новую функцию
+        case "casino":
+            await casino_keyboard(query)
+
+        # ❗️ Здесь тоже нужно было использовать полное обновление
         case "daily":
-            await daily(query, context)
-            
+            # Раньше передавали просто query, теперь правильно
+            await daily(update, context) # <--- Оставляем как есть, но внутри daily поправили
+
         case "shop":
             await show_shop(query, context)
 
         # Обработка покупок товаров
         case buy_item if buy_item.startswith("buy_"):
             await process_purchase(update, context)
-
-        # 🔥 Фикс: вместо вызова несуществующей show_casino добавляем нашу новую функцию
-        case "casino":
-            await casino_keyboard(query)
 
         # Сохраняем игру прямо в БД!
         case "coin_flip" | "dice_roll":
@@ -210,7 +212,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.close()
 
             # Получаем данные синхронно, а потом формируем строку
-            user_data = await get_user(update)
+            user_data = await get_user(update=update) # Передаём полное обновление
             msg = (
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  
@@ -254,14 +256,16 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-async def daily(query, context: ContextTypes.DEFAULT_TYPE):
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE): # <--- Изменил сигнатуру функции
     today = datetime.date.today()
-    user = query.from_user
+    
+    # ❗️ Вот здесь была ошибка!
+    # user_data = await get_user(update=query) <-- Так делать нельзя
+    # Нужно передать ВСЁ обновление целиком
+    user_data = await get_user(update=update) # <--- Исправление тут!
 
-    user_data = await get_user(update=query)
     last_date_str = user_data["last_daily"]
 
-    # Обработка первого запуска (когда поля ещё нет)
     if last_date_str is None:
         days_passed = 1
     else:
@@ -269,7 +273,7 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
         days_passed = (today - last_date).days
 
     if days_passed < 1:
-        await query.edit_message_text("❌ Вы уже забрали бонус сегодня.")
+        await update.callback_query.edit_message_text("❌ Вы уже забрали бонус сегодня.") # <--- Используем callback_query
         return
 
     bonus = DAILY_START + max(DAILY_INCREMENT * (days_passed - 1), 0)
@@ -284,7 +288,7 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
-    await query.edit_message_text(
+    await update.callback_query.edit_message_text( # <--- Используем callback_query
         f"✅ Успех! Вы забрали бонус за {days_passed} день/дня: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
         parse_mode="Markdown",
     )
@@ -346,7 +350,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     item_name, item_price = result
 
     # Проверяем баланс пользователя
-    user_data = await get_user(update)
+    user_data = await get_user(update=update)
     current_balance = user_data["balance"]
 
     if current_balance < item_price:
@@ -377,7 +381,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Она проверит, есть ли у него активная игра, и обработает ставку.
     """
     # Получаем полную информацию о пользователе
-    user_data = await get_user(update)
+    user_data = await get_user(update=update)
 
     # Если у пользователя нет активной игры, просто игнорируем сообщение
     selected_game = user_data.get("current_game")
