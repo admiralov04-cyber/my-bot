@@ -120,7 +120,6 @@ async def get_user(user_id_or_update):
         return None
 
 
-# Фикс ошибки был тут ↓↓↓
 async def save_balance(user_id: int, new_balance: int | None):
     """
     Обновляет баланс пользователя.
@@ -180,7 +179,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ✅ Новый хендлер для кнопки "Показать баланс" в главном меню
 async def show_balance(query):
     user_id = query.from_user.id
-    user_data = await get_user(user_id)
+    user_data = await get_user(user_id=user_id)
 
     if user_data is None:
         return
@@ -226,7 +225,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Обработка ежедневного бонуса
         case "daily":
             # Передаём именно ID пользователя, а не весь update
-            await daily(query.from_user.id, context)
+            await daily(user_id=query.from_user.id, context=context)
+
+        case "shop":
+            await show_shop(query, context)
 
         # Нажатие на кнопку "Казино" в главном меню
         case "casino":
@@ -247,7 +249,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  
             )
-            await query.edit_message_text(msg, parse_mode="constants.ParseMode.MARKDOWN)  # Без клавиатуры
+            await query.edit_message_text(  # <--- Вот здесь была моя опечатка
+                msg, parse_mode=constants.ParseMode.MARKDOWN)  # Закрывающая кавычка добавлена
+                                                                  # ^^^^^^^^^^^^^^ Фикс тут!
 
         # Разделили логику возврата
         # cancel — отмена текущей ставки
@@ -283,7 +287,6 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# Фикс ошибки был здесь ↓↓↓
 async def daily(user_id: int, context: ContextTypes.DEFAULT_TYPE): # <-- Сигнатура верная
     today = datetime.date.today().isoformat()
     
@@ -415,83 +418,4 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bet = int(bet_text)
     except ValueError:
         # Пользователь отправил текст вместо цифры
-        await update.message.reply_text("❌ Пожалуйста, введите числовое значение.", parse_mode="Markdown")
-        return
-
-    if bet <= 0:
-        await update.message.reply_text("Ставка должна быть больше нуля!", parse_mode="Markdown")
-        return
-
-    if bet > user_data["balance"]:
-        await update.message.reply_text("❌ Недостаточно средств на балансе.", parse_mode="Markdown")
-        return
-
-    result_msg = ""
-    win_amount = 0
-
-    # Логика игр
-    if selected_game == "coin_flip":
-        choice = random.choice(["орёл", "решка"])
-        coin = random.choice(["орёл", "решка"])
-        won = choice == coin
-        multiplier = 1.95
-
-        result_msg = f"🤏 Выпал *{coin}*."
-        if won:
-            win_amount = int(bet * multiplier)
-            result_msg += " Ваша ставка сыграла!"
-        else:
-            result_msg += " Попробуйте еще раз."
-
-    elif selected_game == "dice_roll":
-        dice1 = random.randint(1, 6)
-        dice2 = random.randint(1, 6)
-        total = dice1 + dice2
-
-        if total % 2 == 0:
-            win_amount = bet * 2
-            result_msg = f"🎲 Выпало {dice1} + {dice2} = *{total}* (Чет). Победа!"
-        else:
-            result_msg = f"🎲 Выпало {dice1} + {dice2} = *{total}* (Нечет). Проигрыш."
-
-    # Считаем новый баланс
-    new_balance = user_data["balance"] + win_amount - bet
-
-    # Сохраняем изменения баланса И УДАЛЯЕМ АКТИВНУЮ ИГРУ
-    await save_balance(update.effective_user.id, new_balance)
-
-    # Новые кнопки для результата игры
-    play_again_buttons = [
-        [InlineKeyboardButton("⬇ Играть снова", callback_data="casino")], # Вернёмся в список игр
-        [InlineKeyboardButton("↩️ Главное меню", callback_data="mainmenu")] # Или сразу в главное меню
-    ]
-
-    summary = (
-        f"{result_msg}\n\n{'+' if win_amount > 0 else '-'}{abs(win_amount - bet):,} 🪙\nВаш новый баланс: *{new_balance:,}* 🪙"
-    )
-    await update.message.reply_text(
-        summary,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(play_again_buttons)
-    )
-
-
-if __name__ == "__main__":
-    init_db()  # Создаём базу данных при запуске
-
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    # Команды
-    app.add_handler(CommandHandler("start", start))  # Стартовое сообщение
-    app.add_handler(CommandHandler("top", top))     # Команда топ-лидеров
-
-    # Все кнопки
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    # Ввод суммы ставок
-    # Важно: этот обработчик должен идти до обычных командных хэндлеров
-    # Используем стандартные фильтры Telegram для проверки цифр
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), callback=process_bet), group=0)
-
-    print("Бот запущен...")
-    app.run_polling(drop_pending_updates=True)
+        await update.
