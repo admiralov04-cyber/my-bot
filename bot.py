@@ -373,7 +373,7 @@ def game_input_filter(_: Update, ctx: ContextTypes.DEFAULT_TYPE | None = None) -
 if __name__ == "__main__":
     init_db()
 
-    app = ApplicationBuilder().token("ВАШ_ТОКЕН_ОТ_BOTFATHER").build()
+    app = ApplicationBuilder().token("API_TOKEN").build()
 
     # Регистрация обработчиков
     app.add_handler(CommandHandler("start", start))
