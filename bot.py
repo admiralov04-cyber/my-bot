@@ -131,7 +131,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню с кнопками."""
     user_data = await get_user(update=update)
 
-    # Кнопка Баланса теперь открывает отдельный экран
+    # Кнопка Баланса теперь открывает отдельное окно
     keyboard = [
         [InlineKeyboardButton("💰 Баланс", callback_data="show_balance")],
         [InlineKeyboardButton("🎲 Казино", callback_data="casino")],
@@ -161,6 +161,21 @@ async def show_balance(query):
     )
 
 
+# ✅ Логика казино вынесена в отдельную функцию
+async def casino_keyboard(query):
+    game_buttons = [
+        [InlineKeyboardButton("Орел / Решка 🤏", callback_data="coin_flip")],
+        [InlineKeyboardButton("Кости 🎲", callback_data="dice_roll")],
+        [InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")],  # Кнопка назад
+    ]
+
+    await query.edit_message_text(
+        text="*Выберите игру:*",
+        parse_mode=constants.ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(game_buttons),
+    )
+
+
 # --- ОБРАБОТЧИК КНОПОК ---
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -175,15 +190,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case "show_balance":
             await show_balance(query)
 
+        # Обработка ежедневного бонуса
         case "daily":
-            await daily(update, context)
-            
+            # ❇️ Фикс: передаём полный update вместо query
+            await daily(update, context) # <-- Вот здесь была ошибка
+
         case "shop":
             await show_shop(query, context)
-
-        # Обработка покупок товаров
-        case buy_item if buy_item.startswith("buy_"):
-            await process_purchase(update, context)
 
         # Теперь сохраняем игру прямо в БД!
         case "coin_flip" | "dice_roll":
@@ -229,6 +242,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Полностью возвращаемся в главное меню
             await main_menu(update, context)
 
+        # Обработка покупок товаров
+        case buy_item if buy_item.startswith("buy_"):
+            await process_purchase(update, context)
+
 
 # --- ЛИДЕРЫ И ЕЖЕДНЕВНЫЙ БОНУС ---
 
@@ -246,15 +263,15 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE): # <--- Изменил сигнатуру функции
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE): # <--- Сигнатура функции верная
     today = datetime.date.today()
     
-    # ❗️ Исправление: всегда передаём полное обновление целиком
+    # ❇️ Передаём полное обновление целиком
     user_data = await get_user(update=update)
 
     last_date_str = user_data["last_daily"]
 
-    # ❗️ Фикс: дата должна храниться именно в формате YYYY-MM-DD
+    # ❇️ Фикс: дата должна храниться именно в формате YYYY-MM-DD
     # Иначе при сравнении могут возникнуть ошибки
     if last_date_str is None or last_date_str != str(today):
         bonus = DAILY_START
