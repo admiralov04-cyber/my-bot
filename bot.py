@@ -141,7 +141,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
     try:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=reply_markup)
     except Exception as e:
         logger.error(e)
 
@@ -160,7 +160,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data = await get_user(update)
             await query.edit_message_text(
                 text=f"Твой текущий баланс: *{user_data['balance']:,}* 🪙",
-                parse_mode="Markdown"
+                parse_mode="MarkdownV2"  # V2 — более строгая версия markdown
             )
 
         case 'daily':
@@ -177,7 +177,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             await query.edit_message_text(
                 text="*Выберите игру:*",
-                parse_mode="Markdown",
+                parse_mode="MarkdownV2",
                 reply_markup=InlineKeyboardMarkup(casino_keybutton)
             )
             
@@ -188,11 +188,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }[query.data]
 
             # ВНИМАНИЕ! Здесь была ваша ошибка со скобкой!
+            # Сначала получаем данные синхронно, а потом формируем строку
+            user_data = await get_user(update)
             msg = (
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n" \
-                f"Текущий баланс: *(await get_user(update))['balance']:,* 🪙"
+                f"Текущий баланс: *{user_data['balance']:,}* 🪙"  # Теперь здесь число!
             )
-            await query.edit_message_text(msg, parse_mode="Markdown") # Без клавиатуры
+            await query.edit_message_text(msg, parse_mode="MarkdownV2") # Без клавиатуры
             # Сохраняем выбранную игру в контекст, чтобы потом её обработать
             context.user_data['selected_game'] = query.data
 
@@ -226,7 +228,7 @@ async def main_menu_from_callback(query):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{query.from_user.first_name}*!\nВыбери действие:"
     await query.edit_message_text(
-        text=text, parse_mode="Markdown", reply_markup=reply_markup  
+        text=text, parse_mode="MarkdownV2", reply_markup=reply_markup  
     )
 
 
@@ -277,7 +279,7 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         f"✅ Успех! Вы забрали бонус за {days_passed} день/дня: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
-        parse_mode="Markdown"
+        parse_mode="MarkdownV2"
     )
 
 
@@ -307,7 +309,7 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         text=text,
-        parse_mode="Markdown",
+        parse_mode="MarkdownV2",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -377,7 +379,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     summary = (
         f"{result_msg}\n\n{'+' if win_amount > 0 else '-'}{abs(win_amount - bet):,} 🪙\nВаш новый баланс: *{new_balance:,}* 🪙"
     )
-    await update.message.reply_text(summary, parse_mode="Markdown")
+    await update.message.reply_text(summary, parse_mode="MarkdownV2")
 
     # Чистка контекста
     del context.user_data['selected_game']
