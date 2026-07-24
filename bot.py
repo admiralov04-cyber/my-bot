@@ -1,5 +1,10 @@
 import sqlite3  # Для работы с базой данных SQLite
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    constants,
+)
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -10,14 +15,7 @@ from telegram.ext import (
 )
 import datetime
 import random
-import logging  # Логирование ошибок
 
-
-# Настройка логирования
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 # ⚙️ Загрузка токена из системной переменной API_TOKEN (Bothost создаёт её автоматически).
 import os
@@ -31,7 +29,7 @@ if not TOKEN:
 
 # --- НАСТРОЙКИ ---
 DB_NAME = "casino.db"
-DAILY_START = 10_000   # Начальный бонус за день
+DAILY_START = 10_000  # Начальный бонус за день
 DAILY_INCREMENT = 10_000  # Прибавка за каждый пропущенный день
 
 
@@ -66,9 +64,9 @@ def init_db():
     # Заполним магазин базовыми предметами, если он пуст
     if cursor.execute('SELECT COUNT(*) FROM shop').fetchone()[0] == 0:
         items = [
-            ('Счастливая монета', 50_000, 'Увеличивает шанс выигрыша'),
-            ('Удвоитель опыта', 75_000, 'Временное удвоение всех выигрышей'),
-            ('VIP-статус', 200_000, 'Открывает эксклюзивные игры'),
+            ("Счастливая монета", 50_000, "Увеличивает шанс выигрыша"),
+            ("Удвоитель опыта", 75_000, "Временное удвоение всех выигрышей"),
+            ("VIP-статус", 200_000, "Открывает эксклюзивные игры"),
         ]
         cursor.executemany('INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', items)
         
@@ -106,7 +104,7 @@ async def get_user(update: Update):
     ).fetchone() or (None, None, None)
     
     conn.close()
-    return {'balance': data[0], 'last_daily': data[1], 'current_game': data[2]}
+    return {"balance": data[0], "last_daily": data[1], "current_game": data[2]}
 
 
 async def save_balance(user_id: int, amount: int):
@@ -134,18 +132,21 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = await get_user(update)
 
     keyboard = [
-        [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
-        [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
-        [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
-        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
+        [InlineKeyboardButton(f"💰 Баланс: {user_data['balance']:,} 🪙", callback_data="balance")],
+        [InlineKeyboardButton("🎲 Казино", callback_data="casino")],
+        [InlineKeyboardButton("🛍 Магазин", callback_data="shop")],
+        [InlineKeyboardButton("🗓 Ежедневный бонус", callback_data="daily")],
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
+
+    # Исправление: проверка наличия message, чтобы избежать ошибки при старте
     try:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
-    except Exception as e:
-        logger.error(e)
+        await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
+    except AttributeError:
+        # Если мы вызываем эту функцию из коллбека (кнопки Назад), используем edit_message_text
+        await update.callback_query.edit_message_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
 
 
 # --- ОБРАБОТЧИК КНОПОК ---
@@ -155,37 +156,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()  # Подтверждаем нажатие
 
     match query.data:
-        case 'mainmenu':
-            await main_menu_from_callback(query)
+        case "mainmenu":
+            # Переход в главное меню из любой точки
+            await main_menu(update, context)
 
-        case 'balance':
+        case "balance":
             user_data = await get_user(update)
             await query.edit_message_text(
                 text=f"Твой текущий баланс: *{user_data['balance']:,}* 🪙",
-                parse_mode="Markdown"  
+                parse_mode="Markdown",
             )
 
-        case 'daily':
+        case "daily":
             await daily(query, context)
             
-        case 'shop':
+        case "shop":
             await show_shop(query, context)
 
         # Обработка покупок товаров
-        case buy_item if buy_item.startswith('buy_'):
+        case buy_item if buy_item.startswith("buy_"):
             await process_purchase(update, context)
 
         # Теперь сохраняем игру прямо в БД!
-        case 'coin_flip' | 'dice_roll':
+        case "coin_flip" | "dice_roll":
             game_name = {
-                'coin_flip': 'Орел / Решка 🤏',
-                'dice_roll': 'Кости 🎲'
+                "coin_flip": "Орел / Решка 🤏",
+                "dice_roll": "Кости 🎲",
             }[query.data]
 
             # Сохраняем текущую игру в профиль пользователя
             conn = sqlite3.connect(DB_NAME)
             cursor = conn.cursor()
-            cursor.execute("UPDATE users SET current_game = ? WHERE user_id = ?", (query.data, update.effective_user.id))
+            cursor.execute(
+                "UPDATE users SET current_game = ? WHERE user_id = ?", (query.data, update.effective_user.id)
+            )
             conn.commit()
             conn.close()
 
@@ -195,51 +199,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  # Теперь здесь число!
             )
-            await query.edit_message_text(msg, parse_mode="Markdown") # Без клавиатуры
+            await query.edit_message_text(msg, parse_mode="Markdown")  # Без клавиатуры
 
-        # Исправленная логика возврата из магазина
-        # Теперь кнопка «Назад» работает как «cancel»
-        case 'cancel':
-            # Отмена выбора игры/возврат в главное меню
-            # Стираем текущее состояние игры у пользователя
+        # Разделили логику возврата
+        # cancel — отмена текущей ставки
+        # back_to_main — выход из магазина в главное меню
+        case "cancel":
+            # Удалим сохранённую игру из профиля пользователя
             conn = sqlite3.connect(DB_NAME)
             cursor = conn.cursor()
-            cursor.execute("UPDATE users SET current_game = NULL WHERE user_id = ?", (update.effective_user.id,))
+            cursor.execute(
+                "UPDATE users SET current_game = NULL WHERE user_id = ?", (update.effective_user.id,)
+            )
             conn.commit()
             conn.close()
 
-            await main_menu_from_callback(query)
+            # Оставаемся в текущем сообщении, ждём новую ставку
+            await query.answer("Ставка отменена.")
 
-
-async def cancel_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет выбор игры и возвращает в главное меню."""
-    query = update.callback_query
-    await query.answer()
-
-    # Удалим сохранённую игру из профиля пользователя
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET current_game = NULL WHERE user_id = ?", (update.effective_user.id,))
-    conn.commit()
-    conn.close()
-
-    await main_menu_from_callback(query)
+        case "back_to_main":
+            # Полностью возвращаемся в главное меню
+            await main_menu(update, context)
 
 
 async def main_menu_from_callback(query):
-    """Показать главное меню из коллбека (без message object)."""
-    user_data = await get_user(update=query)
-    keyboard = [
-        [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
-        [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
-        [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
-        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"Привет, *{query.from_user.first_name}*!\nВыбери действие:"
-    await query.edit_message_text(
-        text=text, parse_mode="Markdown", reply_markup=reply_markup  
-    )
+    """
+    Этот метод больше не нужен, так как вся логика возврата перенесена выше.
+    """
+    pass
 
 
 # --- ЛИДЕРЫ И ЕЖЕДНЕВНЫЙ БОНУС ---
@@ -247,7 +234,7 @@ async def main_menu_from_callback(query):
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT username, balance FROM users ORDER BY balance DESC LIMIT 10')
+    cursor.execute("SELECT username, balance FROM users ORDER BY balance DESC LIMIT 10")
     leaders = cursor.fetchall()
     conn.close()
 
@@ -263,13 +250,13 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
 
     user_data = await get_user(update=query)
-    last_date_str = user_data['last_daily']
+    last_date_str = user_data["last_daily"]
 
     # Обработка первого запуска (когда поля ещё нет)
     if last_date_str is None:
         days_passed = 1
     else:
-        last_date = datetime.datetime.strptime(last_date_str, '%Y-%m-%d').date()
+        last_date = datetime.datetime.strptime(last_date_str, "%Y-%m-%d").date()
         days_passed = (today - last_date).days
 
     if days_passed < 1:
@@ -277,19 +264,20 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
         return
 
     bonus = DAILY_START + max(DAILY_INCREMENT * (days_passed - 1), 0)
-    new_balance = user_data['balance'] + bonus
+    new_balance = user_data["balance"] + bonus
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.conn.cursor()
     cursor.execute(
-        'UPDATE users SET balance = ?, last_daily = ? WHERE user_id = ?',
-        (new_balance, today.isoformat(), user.id))
+        "UPDATE users SET balance = ?, last_daily = ? WHERE user_id = ?",
+        (new_balance, today.isoformat(), user.id),
+    )
     conn.commit()
     conn.close()
 
     await query.edit_message_text(
         f"✅ Успех! Вы забрали бонус за {days_passed} день/дня: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
     )
 
 
@@ -308,8 +296,9 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
         buttons.append([InlineKeyboardButton(button_name, callback_data=f"buy_{item_id}")])
 
     # Добавляем кнопку возврата
+    # Изменено на отдельную команду для магазина
     buttons.append(
-        [InlineKeyboardButton('↩️ Назад', callback_data='cancel')] # Используем cancel для возврата
+        [InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")]
     )
 
     # Формируем текст со списком товаров БЕЗ эмодзи в начале строк
@@ -333,7 +322,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     # Извлекаем ID товара из callback_data
-    _, item_id = query.data.split('_')
+    _, item_id = query.data.split("_")
     item_id = int(item_id)
 
     # Получаем информацию о товаре
@@ -349,10 +338,12 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Проверяем баланс пользователя
     user_data = await get_user(update)
-    current_balance = user_data['balance']
+    current_balance = user_data["balance"]
 
     if current_balance < item_price:
-        await query.edit_message_text(f"❌ Недостаточно средств для покупки '{item_name}'. Ваш баланс: {current_balance:,}")
+        await query.edit_message_text(
+            f"❌ Недостаточно средств для покупки '{item_name}'. Ваш баланс: {current_balance:,}"
+        )
         return
 
     # Покупка успешна
@@ -362,11 +353,11 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Сообщение об успехе
     await query.edit_message_text(
         f"✅ Вы купили '{item_name}' за {item_price:,} монет!\nВаш новый баланс: *{new_balance:,}* 🪙",
-        parse_mode=constants.ParseMode.MARKDOWN
+        parse_mode=constants.ParseMode.MARKDOWN,
     )
 
     # Возвращаемся в главное меню
-    await main_menu_from_callback(query)
+    await main_menu(update, context)
 
 
 # --- ИГРОПРОВОДНИК —
@@ -380,11 +371,11 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = await get_user(update)
 
     # Если у пользователя нет активной игры, просто игнорируем сообщение
-    selected_game = user_data.get('current_game')
+    selected_game = user_data.get("current_game")
     if not selected_game:
         return
 
-    bet_text = update.message.text.replace(',', '').replace(' ', '')
+    bet_text = update.message.text.replace(",", "").replace(" ", "")
 
     # Пытаемся преобразовать введённое значение в целое число
     try:
@@ -398,7 +389,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ставка должна быть больше нуля!", parse_mode="Markdown")
         return
 
-    if bet > user_data['balance']:
+    if bet > user_data["balance"]:
         await update.message.reply_text("❌ Недостаточно средств на балансе.", parse_mode="Markdown")
         return
 
@@ -406,9 +397,9 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     win_amount = 0
 
     # Логика игр
-    if selected_game == 'coin_flip':
-        choice = random.choice(['орёл', 'решка'])
-        coin = random.choice(['орёл', 'решка'])
+    if selected_game == "coin_flip":
+        choice = random.choice(["орёл", "решка"])
+        coin = random.choice(["орёл", "решка"])
         won = choice == coin
         multiplier = 1.95
 
@@ -419,7 +410,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             result_msg += " Попробуйте еще раз."
 
-    elif selected_game == 'dice_roll':
+    elif selected_game == "dice_roll":
         dice1 = random.randint(1, 6)
         dice2 = random.randint(1, 6)
         total = dice1 + dice2
@@ -431,14 +422,14 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result_msg = f"🎲 Выпало {dice1} + {dice2} = *{total}* (Нечет). Проигрыш."
 
     # Считаем новый баланс
-    new_balance = user_data['balance'] + win_amount - bet
+    new_balance = user_data["balance"] + win_amount - bet
 
     # Сохраняем изменения баланса И УДАЛЯЕМ АКТИВНУЮ ИГРУ
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(
         "UPDATE users SET balance = ?, current_game = NULL WHERE user_id = ?",
-        (new_balance, update.effective_user.id)
+        (new_balance, update.effective_user.id),
     )
     conn.commit()
     conn.close()
@@ -447,16 +438,6 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{result_msg}\n\n{'+' if win_amount > 0 else '-'}{abs(win_amount - bet):,} 🪙\nВаш новый баланс: *{new_balance:,}* 🪙"
     )
     await update.message.reply_text(summary, parse_mode="Markdown")
-
-
-# ✍️ Кастомный фильтр для ввода суммы
-# Теперь фильтруем любые цифровые сообщения без привязки к контексту
-def game_input_filter(_: Update, ctx: ContextTypes.DEFAULT_TYPE | None = None) -> bool:
-    """
-    Этот фильтр позволяет обрабатывать любое цифровое сообщение от пользователя.
-    Мы будем проверять наличие активной игры непосредственно в функции-обработчике.
-    """
-    return _.message is not None and _.message.text.isdigit()
 
 
 if __name__ == "__main__":
@@ -473,8 +454,8 @@ if __name__ == "__main__":
 
     # Ввод суммы ставок
     # Важно: этот обработчик должен идти до обычных командных хэндлеров
-    # Он будет ловить ЛЮБЫЕ цифровые сообщения, но обработка произойдёт только при наличии активной игры
-    app.add_handler(MessageHandler(game_input_filter, process_bet), group=0)
+    # Используем стандартные фильтры Telegram для проверки цифр
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regexp(r"^\d+$"), callback=process_bet), group=0)
 
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
