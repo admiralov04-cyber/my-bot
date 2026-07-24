@@ -29,7 +29,7 @@ if not TOKEN:
 
 # --- НАСТРОЙКИ ---
 DB_NAME = "casino.db"
-DAILY_START = 10_000  # Начальный бонус за день
+DAILY_START = 10_000   # Начальный бонус за день
 DAILY_INCREMENT = 10_000  # Прибавка за каждый пропущенный день
 
 
@@ -197,7 +197,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data = await get_user(update)
             msg = (
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
-                f"Текущий баланс: *{user_data['balance']:,}* 🪙"  # Теперь здесь число!
+                f"Текущий баланс: *{user_data['balance']:,}* 🪙"  
             )
             await query.edit_message_text(msg, parse_mode="Markdown")  # Без клавиатуры
 
@@ -220,6 +220,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case "back_to_main":
             # Полностью возвращаемся в главное меню
             await main_menu(update, context)
+
+
+async def cancel_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Этот метод больше не нужен, так как вся логика возврата перенесена выше.
+    """
+    pass
 
 
 async def main_menu_from_callback(query):
@@ -454,8 +461,8 @@ if __name__ == "__main__":
 
     # Ввод суммы ставок
     # Важно: этот обработчик должен идти до обычных командных хэндлеров
-    # Используем стандартные фильтры Telegram для проверки цифр
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regexp(r"^\d+$"), callback=process_bet), group=0)
+    # ФИЛЬТР ИСПРАВЛЁН: теперь используется Regex вместо Regexp
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), callback=process_bet), group=0)
 
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
