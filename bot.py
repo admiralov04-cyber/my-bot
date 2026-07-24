@@ -157,7 +157,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню с кнопками."""
-    user_data = await get_user(update=update)
+    # Исправление ошибки: убираем знак равенства
+    user_data = await get_user(update)
 
     keyboard = [
         [InlineKeyboardButton("💰 Баланс", callback_data="show_balance")],
@@ -178,8 +179,9 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ✅ Новый хендлер для кнопки "Показать баланс" в главном меню
 async def show_balance(query):
+    # Здесь тоже убираем лишний знак =
     user_id = query.from_user.id
-    user_data = await get_user(user_id=user_id)
+    user_data = await get_user(user_id)
 
     if user_data is None:
         return
@@ -244,14 +246,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "dice_roll": "Кости 🎲",
             }[query.data]
 
+            # Убираем лишнее '=' при получении данных пользователя
             user_data = await get_user(query.from_user.id)
             msg = (
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  
             )
-            await query.edit_message_text(  # <--- Вот здесь была моя опечатка
+            await query.edit_message_text(  
                 msg, parse_mode=constants.ParseMode.MARKDOWN)  # Закрывающая кавычка добавлена
-                                                                  # ^^^^^^^^^^^^^^ Фикс тут!
 
         # Разделили логику возврата
         # cancel — отмена текущей ставки
@@ -369,6 +371,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     item_name, item_price = result
 
+    # Убираем лишний знак '=' при получении данных пользователя
     user_data = await get_user(query.from_user.id)
     if user_data is None:
         return
