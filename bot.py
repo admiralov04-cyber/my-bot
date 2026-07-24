@@ -179,8 +179,8 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ✅ Новый хендлер для кнопки "Показать баланс" в главном меню
 async def show_balance(query):
-    # Здесь тоже убираем лишний знак =
-    user_data = await get_user(query.update) # <--- Передача всего объекта Update
+    # Фикс здесь ↓↓↓ Используем корректную ссылку на родителя!
+    user_data = await get_user(query) # <--- Передача всего объекта Query (он наследует от Update)
 
     if user_data is None:
         return
@@ -260,7 +260,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case "cancel":
             # Удалим сохранённую игру из профиля пользователя
             # Фикс здесь ↓↓↓ Используем корректный ключ!
-            await save_balance(user_data=user_data["user_id"], new_balance=None)  
+            await save_balance(user_id=user_data["user_id"], new_balance=None)  
             # Оставаемся в текущем сообщении, ждём новую ставку
             await query.answer("Ставка отменена.")
 
