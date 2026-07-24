@@ -37,95 +37,103 @@ DAILY_INCREMENT = 10_000  # Прибавка за каждый пропущен�
 def init_db():
     """Инициализация базы данных"""
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        
-        # Создадим таблицу пользователей полностью заново, если она повреждена
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                balance INTEGER DEFAULT 10000,
-                last_daily DATE, -- Дата последнего получения бонуса
-                current_game TEXT   -- Текущая игра пользователя
-            );
-        ''')
-        
-        # Таблица магазина предметов
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS shop (
-                item_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE,
-                price INTEGER,
-                description TEXT
-            );
-        ''')
-        
-        # Заполним магазин базовыми предметами, если он пуст
-        if cursor.execute('SELECT COUNT(*) FROM shop').fetchone()[0] == 0:
-            items = [
-                ("Счастливая монета", 50_000, "Увеличивает шанс выигрыша"),
-                ("Удвоитель опыта", 75_000, "Временное удвоение всех выигрышей"),
-                ("VIP-статус", 200_000, "Открывает эксклюзивные игры"),
-            ]
-            cursor.executemany('INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', items)
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
             
-        conn.commit()
-        print("[INFO] Database initialized successfully.")
+            # Создадим таблицу пользователей полностью заново, если она повреждена
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    balance INTEGER DEFAULT 10000,
+                    last_daily DATE, -- Дата последнего получения бонуса
+                    current_game TEXT   -- Текущая игра пользователя
+                );
+            ''')
+            
+            # Таблица магазина предметов
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS shop (
+                    item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE,
+                    price INTEGER,
+                    description TEXT
+                );
+            ''')
+            
+            # Заполним магазин базовыми предметами, если он пуст
+            if cursor.execute('SELECT COUNT(*) FROM shop').fetchone()[0] == 0:
+                items = [
+                    ("Счастливая монета", 50_000, "Увеличивает шанс выигрыша"),
+                    ("Удвоитель опыта", 75_000, "Временное удвоение всех выигрышей"),
+                    ("VIP-статус", 200_000, "Открывает эксклюзивные игры"),
+                ]
+                cursor.executemany('INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', items)
+                
+            print("[INFO] Database initialized successfully.")
     except Exception as e:
         print(f"[ERROR] Failed to initialize database: {e}")
 
 
-async def get_user(update):
+async def get_user(user_id_or_update):
     """
     Получаем данные пользователя из базы.
+    
+    Теперь функция принимает на вход ЛИБО id пользователя (int),
+    ЛИБО весь объект update для извлечения этого id.
     Регистрирует нового игрока, если его нет.
-    Возвращает ВСЕ поля пользователя.
+    Возвращает ВСЕ поля пользователя или None при ошибке.
     """
-    user = update.effective_user
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
+        # Если передали целое число - это id пользователя
+        if isinstance(user_id_or_update, int):
+            user_id = user_id_or_update
+        else:
+            # Иначе извлекаем id из объекта Update
+            user_id = user_id_or_update.effective_user.id
+
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            
+            # Проверяем/добавляем пользователя
+            cursor.execute(
+                '''
+                INSERT OR IGNORE INTO users (user_id, username) 
+                VALUES (?, '');
+                ''',
+                (user_id,)
+            )
+            conn.commit()
+            
+            # Берём баланс, дату бонуса И текущую игру
+            data = cursor.execute(
+                '''
+                SELECT balance, last_daily, current_game 
+                FROM users WHERE user_id = ?
+                ''',
+                (user_id,)
+            ).fetchone()
         
-        # Проверяем/добавляем пользователя
-        cursor.execute(
-            '''
-            INSERT OR IGNORE INTO users (user_id, username) 
-            VALUES (?, ?);
-            ''',
-            (user.id, user.username),
-        )
-        conn.commit()
-        
-        # Берём баланс, дату бонуса И текущую игру
-        data = cursor.execute(
-            '''
-            SELECT balance, last_daily, current_game 
-            FROM users WHERE user_id = ?
-            ''',
-            (user.id,)
-        ).fetchone()
-        
-        conn.close()
         return {"balance": data[0], "last_daily": data[1], "current_game": data[2]}
     except Exception as e:
-        # <--- ОТЛАДКА: выведем ошибку прямо здесь
-        await update.message.reply_text(f"❗️ Error in DB query: {str(e)}")
+        print(f"❗️ Error in DB query for user {user_id}: {str(e)}")
         return None
 
 
 async def save_balance(user_id: int, amount: int):
     """Обновляет баланс пользователя."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        '''
-        UPDATE users SET balance = ? WHERE user_id = ?
-        ''',
-        (amount, user_id),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE users SET balance = ? WHERE user_id = ?
+                ''',
+                (amount, user_id),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"❗️ Error saving balance for user {user_id}: {str(e)}")
 
 
 # --- КОМАНДЫ И МЕНЮ ---
@@ -136,7 +144,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню с кнопками."""
-    user_data = await get_user(update=update)
+    user_data = await get_user(update)
 
     # Кнопка Баланса теперь открывает отдельное окно
     keyboard = [
@@ -158,7 +166,9 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ✅ Новый хендлер для кнопки "Показать баланс" в главном меню
 async def show_balance(query):
-    user_data = await get_user(update=query.update)
+    user_id = query.from_user.id
+    user_data = await get_user(user_id)
+
     if user_data is None:
         return
 
@@ -202,8 +212,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Обработка ежедневного бонуса
         case "daily":
-            # Теперь корректно передаём полный update вместо query
-            await daily(update, context)
+            # Передаём именно ID пользователя, а не весь update
+            await daily(query.from_user.id, context)
+
+        case "shop":
+            await show_shop(query, context)
 
         # Нажатие на кнопку "Казино" в главном меню
         case "casino":
@@ -219,7 +232,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "dice_roll": "Кости 🎲",
             }[query.data]
 
-            user_data = await get_user(update=update)
+            user_data = await get_user(query.from_user.id)
             msg = (
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  
@@ -231,14 +244,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # back_to_main — выход из магазина или списка игр в главное меню
         case "cancel":
             # Удалим сохранённую игру из профиля пользователя
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET current_game = NULL WHERE user_id = ?", (update.effective_user.id,)
-            )
-            conn.commit()
-            conn.close()
-
+            await save_balance(query.from_user.id, None) # Специально передаю None, чтобы сбросить игру
             # Оставаемся в текущем сообщении, ждём новую ставку
             await query.answer("Ставка отменена.")
 
@@ -267,39 +273,34 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- Сигнатура верная
-    today = datetime.date.today()
+async def daily(user_id: int, context: ContextTypes.DEFAULT_TYPE): # <-- Сигнатура изменена
+    today = datetime.date.today().isoformat()
     
-    # ❇️ Передаём полное обновление целиком
-    user_data = await get_user(update=update)
+    user_data = await get_user(user_id)
     if user_data is None:
         return
 
     last_date_str = user_data["last_daily"]
 
-    # ❇️ Фикс: дата должна храниться именно в формате YYYY-MM-DD
+    # Фикс: дата должна храниться именно в формате YYYY-MM-DD
     # Иначе при сравнении могут возникнуть ошибки
     if last_date_str is None or str(last_date_str) != str(today):
         bonus = DAILY_START
         new_balance = user_data["balance"] + bonus
 
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.conn.cursor()
-        cursor.execute(
-            "UPDATE users SET balance = ?, last_daily = ? WHERE user_id = ?",
-            (new_balance, str(today), user.id),
-        )
-        conn.commit()
-        conn.close()
+        await save_balance(user_id, new_balance)
 
-        await update.callback_query.edit_message_text( # <-- Используем callback_query
-            f"✅ Успех! Вы получили свой дневной бонус: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
-            parse_mode="Markdown",
+        # Отправляем ответ пользователю
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"✅ Успех! Вы получили свой дневной бонус: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
+            parse_mode="Markdown"
         )
     else:
-        await update.callback_query.edit_message_text( # <-- Используем callback_query
-            "❌ Вы уже забрали бонус сегодня.",
-            parse_mode="Markdown",
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ Вы уже забрали бонус сегодня.",
+            parse_mode="Markdown"
         )
 
 
@@ -347,13 +348,14 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor = conn.cursor()
     cursor.execute("SELECT name, price FROM shop WHERE item_id = ?", (item_id,))
     result = cursor.fetchone()
+    conn.close()
     if not result:
         await query.edit_message_text("Ошибка: товар не найден!")
         return
 
     item_name, item_price = result
 
-    user_data = await get_user(update=update)
+    user_data = await get_user(query.from_user.id)
     if user_data is None:
         return
 
@@ -367,7 +369,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Покупка успешна
     new_balance = current_balance - item_price
-    await save_balance(update.effective_user.id, new_balance)
+    await save_balance(query.from_user.id, new_balance)
 
     # Сообщение об успехе
     await query.edit_message_text(
@@ -386,12 +388,10 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Эта функция срабатывает при вводе любой цифры от пользователя.
     Она проверит, есть ли у него активная игра, и обработает ставку.
     """
-    # Получаем полную информацию о пользователе
-    user_data = await get_user(update=update)
+    user_data = await get_user(update.effective_user.id)
     if user_data is None:
         return
 
-    # Если у пользователя нет активной игры, просто игнорируем сообщение
     selected_game = user_data.get("current_game")
     if not selected_game:
         return
@@ -446,16 +446,9 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_balance = user_data["balance"] + win_amount - bet
 
     # Сохраняем изменения баланса И УДАЛЯЕМ АКТИВНУЮ ИГРУ
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE users SET balance = ?, current_game = NULL WHERE user_id = ?",
-        (new_balance, update.effective_user.id),
-    )
-    conn.commit()
-    conn.close()
+    await save_balance(update.effective_user.id, new_balance)
 
-    # 🔥 Новые кнопки для результата игры
+    # Новые кнопки для результата игры
     play_again_buttons = [
         [InlineKeyboardButton("⬇ Играть снова", callback_data="casino")], # Вернёмся в список игр
         [InlineKeyboardButton("↩️ Главное меню", callback_data="mainmenu")] # Или сразу в главное меню
