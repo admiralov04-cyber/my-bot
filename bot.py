@@ -75,8 +75,7 @@ def init_db():
         print(f"[ERROR] Failed to initialize database: {e}")
 
 
-# Фикс здесь ↓↓↓ Убираем лишние параметры и оставляем только один универсальный аргумент
-async def get_user(update):  # <-- Теперь у функции только один аргумент
+async def get_user(update):
     """
     Получаем данные пользователя из базы.
     
@@ -227,7 +226,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Обработка ежедневного бонуса
         case "daily":
             # Вот тут была ошибка! Нужно передавать именно объект Update, а не разбирать его вручную
-            await daily(update, context) # <--- Фикс: передаю весь update
+            await daily(update, context) # <-- Фикс: передаю весь update
 
         case "shop":
             await show_shop(query, context)
