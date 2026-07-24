@@ -75,22 +75,23 @@ def init_db():
         print(f"[ERROR] Failed to initialize database: {e}")
 
 
-async def get_user(user_id_or_update):
+# Фикс здесь ↓↓↓ Убираем лишние параметры и оставляем только один универсальный аргумент
+async def get_user(update):  # <-- Теперь у функции только один аргумент
     """
     Получаем данные пользователя из базы.
     
-    Теперь функция принимает на вход ЛИБО id пользователя (int),
+    Функция принимает ЛИБО id пользователя (int),
     ЛИБО весь объект update для извлечения этого id.
     Регистрирует нового игрока, если его нет.
     Возвращает ВСЕ поля пользователя или None при ошибке.
     """
     try:
         # Если передали целое число - это id пользователя
-        if isinstance(user_id_or_update, int):
-            user_id = user_id_or_update
+        if isinstance(update, int):
+            user_id = update
         else:
             # Иначе извлекаем id из объекта Update
-            user_id = user_id_or_update.effective_user.id
+            user_id = update.effective_user.id
 
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
@@ -157,7 +158,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню с кнопками."""
-    # Исправление ошибки: убираем знак равенства
+    # Исправление ошибки: передаём просто update, а не через знак =
     user_data = await get_user(update)
 
     keyboard = [
@@ -180,8 +181,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ✅ Новый хендлер для кнопки "Показать баланс" в главном меню
 async def show_balance(query):
     # Здесь тоже убираем лишний знак =
-    user_id = query.from_user.id
-    user_data = await get_user(user_id)
+    user_data = await get_user(query.update) # <--- Передача всего объекта Update
 
     if user_data is None:
         return
@@ -226,8 +226,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Обработка ежедневного бонуса
         case "daily":
-            # Передаём именно ID пользователя, а не весь update
-            await daily(user_id=query.from_user.id, context=context)
+            # Вот тут была ошибка! Нужно передавать именно объект Update, а не разбирать его вручную
+            await daily(update, context) # <--- Фикс: передаю весь update
 
         case "shop":
             await show_shop(query, context)
@@ -247,7 +247,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }[query.data]
 
             # Убираем лишнее '=' при получении данных пользователя
-            user_data = await get_user(query.from_user.id)
+            user_data = await get_user(update) # <--- Передача всего объекта Update
             msg = (
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  
@@ -289,10 +289,13 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-async def daily(user_id: int, context: ContextTypes.DEFAULT_TYPE): # <-- Сигнатура верная
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- Сигнатура верная
     today = datetime.date.today().isoformat()
     
-    user_data = await get_user(user_id=user_id)
+    # Вот тут было ключевая ошибка! Раньше я писал user_id=user_id
+    # Фикс: теперь передаём весь объект Update, чтобы get_user сам разобрал его
+    user_data = await get_user(update) # <--- Позиционный вызов
+
     if user_data is None:
         return
 
@@ -304,17 +307,17 @@ async def daily(user_id: int, context: ContextTypes.DEFAULT_TYPE): # <-- Сиг�
         bonus = DAILY_START
         new_balance = user_data["balance"] + bonus
 
-        await save_balance(user_id, new_balance)
+        await save_balance(user_data["id"], new_balance)
 
         # Отправляем ответ пользователю
         await context.bot.send_message(
-            chat_id=user_id,
+            chat_id=update.effective_chat.id,
             text=f"✅ Успех! Вы получили свой дневной бонус: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
             parse_mode="Markdown"
         ) # <--- Вот здесь был мой косяк! Раньше было написано просто `update.`
     else:
         await context.bot.send_message(
-            chat_id=user_id,
+            chat_id=update.effective_chat.id,
             text="❌ Вы уже забрали бонус сегодня.",
             parse_mode="Markdown"
         )
@@ -372,7 +375,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     item_name, item_price = result
 
     # Убираем лишний знак '=' при получении данных пользователя
-    user_data = await get_user(query.from_user.id)
+    user_data = await get_user(update) # <--- Передача всего объекта Update
     if user_data is None:
         return
 
@@ -386,7 +389,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Покупка успешна
     new_balance = current_balance - item_price
-    await save_balance(query.from_user.id, new_balance)
+    await save_balance(user_data["id"], new_balance)
 
     # Сообщение об успехе
     await query.edit_message_text(
@@ -406,7 +409,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Она проверит, есть ли у него активная игра, и обработает ставку.
     """
     # Получаем полную информацию о пользователе
-    user_data = await get_user(update.effective_user.id)
+    user_data = await get_user(update) # <--- Передача всего объекта Update
     if user_data is None:
         return
 
@@ -464,7 +467,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_balance = user_data["balance"] + win_amount - bet
 
     # Сохраняем изменения баланса И УДАЛЯЕМ АКТИВНУЮ ИГРУ
-    await save_balance(update.effective_user.id, new_balance)
+    await save_balance(user_data["id"], new_balance)
 
     # Новые кнопки для результата игры
     play_again_buttons = [
