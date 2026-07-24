@@ -134,14 +134,15 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
         [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
-        [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
-        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
+        [InlineKeyboardButton('Магазин 🛍️', callback_data='shop')],
+        [InlineKeyboardButton('Ежедневный бонус 🗓', callback_data='daily')]
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
     try:
-        await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=reply_markup)
+        # Используем обычный Markdown для избежания проблем с эмодзи в начале строки
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
         logger.error(e)
 
@@ -160,7 +161,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data = await get_user(update)
             await query.edit_message_text(
                 text=f"Твой текущий баланс: *{user_data['balance']:,}* 🪙",
-                parse_mode="MarkdownV2"  # V2 — более строгая версия markdown
+                parse_mode="Markdown"  # Обычный markdown
             )
 
         case 'daily':
@@ -177,7 +178,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             await query.edit_message_text(
                 text="*Выберите игру:*",
-                parse_mode="MarkdownV2",
+                parse_mode="Markdown",  # Обычный markdown
                 reply_markup=InlineKeyboardMarkup(casino_keybutton)
             )
             
@@ -191,10 +192,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Сначала получаем данные синхронно, а потом формируем строку
             user_data = await get_user(update)
             msg = (
-                f"Введите сумму ставки для игры \"*{game_name}*\":\n\n" \
+                f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  # Теперь здесь число!
             )
-            await query.edit_message_text(msg, parse_mode="MarkdownV2") # Без клавиатуры
+            await query.edit_message_text(msg, parse_mode="Markdown") # Без клавиатуры
             # Сохраняем выбранную игру в контекст, чтобы потом её обработать
             context.user_data['selected_game'] = query.data
 
@@ -206,7 +207,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отменяет выбор игры и возвращает в главное меню."""
-    query = update.callback_query
+    query = update.callback_rule.query
     await query.answer()
 
     # Удалим сохранённую игру из контекста
@@ -222,13 +223,13 @@ async def main_menu_from_callback(query):
     keyboard = [
         [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
         [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
-        [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
-        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
+        [InlineKeyboardButton('Магазин 🛍️', callback_data='shop')],
+        [InlineKeyboardButton('Ежедневный бонус 🗓', callback_data='daily')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{query.from_user.first_name}*!\nВыбери действие:"
     await query.edit_message_text(
-        text=text, parse_mode="MarkdownV2", reply_markup=reply_markup  
+        text=text, parse_mode="Markdown", reply_markup=reply_markup  
     )
 
 
@@ -245,7 +246,7 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, (username, bal) in enumerate(leaders, 1):
         name = username or "Аноним"
         msg += f"{i}. {name}: {bal:,} 🪙\n"
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def daily(query, context: ContextTypes.DEFAULT_TYPE):
@@ -279,7 +280,7 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         f"✅ Успех! Вы забрали бонус за {days_passed} день/дня: *{bonus:,}* 🪙.\nНовый баланс: *{new_balance:,}* 🪙",
-        parse_mode="MarkdownV2"
+        parse_mode="Markdown"
     )
 
 
@@ -289,19 +290,22 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
 
-    # Собираем кнопки товаров
+    # Собираем кнопки товаров. ЭМОДЗИ ДОБАВЛЕНЫ ТОЛЬКО В НАЗВАНИЯ КНОПОК!
     buttons = []
     for row in cur.execute("SELECT item_id, name, price FROM shop"):
         item_id, name, _price = row
-        buttons.append([InlineKeyboardButton(name, callback_data=f"buy_{item_id}")])
+        # Добавляем эмодзи только к названию на кнопке, а не в текст сообщения
+        button_name = f"{name} \U0001f4b8 {_price:,}"  # Эмодзи монеты экранировано
+        buttons.append([InlineKeyboardButton(button_name, callback_data=f"buy_{item_id}")])
 
     # Добавляем кнопку возврата
     buttons.append(
         [InlineKeyboardButton('↩️ Назад', callback_data='mainmenu')]
     )
 
-    # Формируем текст со списком товаров
-    text = "*🛍 Добро пожаловать в магазин:*\n"
+    # Формируем текст со списком товаров БЕЗ эмодзи в начале строк
+    # Это решает проблему парсинга Markdown V2
+    text = "*Добро пожаловать в магазин!*\n"
     for name, price, desc in cur.execute("SELECT name, price, description FROM shop"):
         text += f"\n• {name}\nЦена: {price:,} 🪙\n{desc}"
 
@@ -309,7 +313,8 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         text=text,
-        parse_mode="MarkdownV2",
+        # Используем обычный Markdown — это самый надёжный вариант
+        parse_mode=constants.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -318,8 +323,7 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Эта функция срабатывает только тогда, когда пользователь ввёл число
-    после того, как выбрал одну из игр.
+    Эта функция срабатывает только тогда, когда пользователь ввёл число после того, как выбрал одну из игр.
     """
     selected_game = context.user_data.get('selected_game')
     if not selected_game:
@@ -379,7 +383,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     summary = (
         f"{result_msg}\n\n{'+' if win_amount > 0 else '-'}{abs(win_amount - bet):,} 🪙\nВаш новый баланс: *{new_balance:,}* 🪙"
     )
-    await update.message.reply_text(summary, parse_mode="MarkdownV2")
+    await update.message.reply_text(summary, parse_mode="Markdown")
 
     # Чистка контекста
     del context.user_data['selected_game']
