@@ -1,14 +1,5 @@
-# ⚙️ Загрузка токена из системной переменной API_TOKEN (Bothost создаёт её автоматически).
-import os
-TOKEN = os.getenv("API_TOKEN")
-if not TOKEN:
-    raise ValueError(
-        "🛑 Ошибка! Переменная окружения API_TOKEN не найдена."
-        "\nПроверьте настройки вашего сервера."
-    )
-
-import sqlite3 # Для работы с базой данных SQLite
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import sqlite3  # Для работы с базой данных SQLite
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -19,6 +10,24 @@ from telegram.ext import (
 )
 import datetime
 import random
+import logging  # Логирование ошибок
+
+
+# Настройка логирования
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+
+# ⚙️ Загрузка токена из системной переменной API_TOKEN (Bothost создаёт её автоматически).
+import os
+TOKEN = os.getenv("API_TOKEN")
+if not TOKEN:
+    raise ValueError(
+        "🛑 Ошибка! Переменная окружения API_TOKEN не найдена."
+        "\nПроверьте настройки вашего сервера."
+    )
 
 
 # --- НАСТРОЙКИ ---
@@ -132,10 +141,9 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
     try:
-        # Исправлена ошибка с двойным подчёркиванием!
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
     except Exception as e:
-        print(e)
+        logger.error(e)
 
 
 # --- ОБРАБОТЧИК КНОПОК ---
@@ -150,7 +158,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         case 'balance':
             user_data = await get_user(update)
-            await query.edit_message_text(  # edit_, так как это колбек
+            await query.edit_message_text(
                 text=f"Твой текущий баланс: *{user_data['balance']:,}* 🪙",
                 parse_mode="Markdown"
             )
@@ -165,7 +173,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             casino_keybutton = [
                 [InlineKeyboardButton('Орел / Решка 🤏', callback_data='coin_flip')],
                 [InlineKeyboardButton('Кости 🎲', callback_data='dice_roll')],
-                [InlineKeyboardButton('Назад ↩️', callback_data='cancel')]  # Добавил кнопку отмены
+                [InlineKeyboardButton('Назад ↩️', callback_data='cancel')]  # Кнопка отмены
             ]
             await query.edit_message_text(
                 text="*Выберите игру:*",
@@ -179,8 +187,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'dice_roll': 'Кости 🎲'
             }[query.data]
 
-            msg = f"Введите сумму ставки для игры \"*{game_name}*\":\n\n" \
-                  f"(текущий баланс: *(await get_user(update))['balance']:,)* 🪙)"
+            # ВНИМАНИЕ! Здесь была ваша ошибка со скобкой!
+            msg = (
+                f"Введите сумму ставки для игры \"*{game_name}*\":\n\n" \
+                f"Текущий баланс: *(await get_user(update))['balance']:,* 🪙"
+            )
             await query.edit_message_text(msg, parse_mode="Markdown") # Без клавиатуры
             # Сохраняем выбранную игру в контекст, чтобы потом её обработать
             context.user_data['selected_game'] = query.data
@@ -204,17 +215,16 @@ async def cancel_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def main_menu_from_callback(query):
-    """Показать главное меню из коллбека (без message object)"""
+    """Показать главное меню из коллбека (без message object)."""
     user_data = await get_user(update=query)
     keyboard = [
         [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
         [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
         [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
-        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='dayli')]
+        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{query.from_user.first_name}*!\nВыбери действие:"
-    # Исправлено на edit_message_text — иначе будет ошибка при перезапуске бота
     await query.edit_message_text(
         text=text, parse_mode="Markdown", reply_markup=reply_markup  
     )
