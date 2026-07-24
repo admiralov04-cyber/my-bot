@@ -22,15 +22,14 @@ if not TOKEN:
 
 DB_NAME = "casino.db"
 DAILY_START = 10_000
-DAILY_INCREMENT = 10_000  # пока не используется, можно задействовать позже
 
+# --- БАЗА ДАННЫХ (Синхронные функции для работы с SQLite) ---
 
-# --- БАЗА ДАННЫХ (синхронная, вызывается через run_in_executor) ---
-
-def init_db():
+def _init_db_sync():
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
+            # Таблица пользователей
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
@@ -40,6 +39,7 @@ def init_db():
                     current_game TEXT
                 );
             ''')
+            # Таблица магазина
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS shop (
                     item_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +48,7 @@ def init_db():
                     description TEXT
                 );
             ''')
+            # Заполняем магазин, если он пуст
             if cursor.execute('SELECT COUNT(*) FROM shop').fetchone()[0] == 0:
                 items = [
                     ("Счастливая монета", 50_000, "Увеличивает шанс выигрыша"),
@@ -59,8 +60,11 @@ def init_db():
     except Exception as e:
         print(f"[ERROR] Failed to initialize database: {e}")
 
+async def init_db():
+    await asyncio.to_thread(_init_db_sync)
 
-def _get_user_sync(user_id: int):
+def _get_user_data_sync(user_id: int):
+    """Возвращает полный словарь с данными пользователя, включая user_id"""
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         # Регистрируем пользователя, если его нет
@@ -69,58 +73,67 @@ def _get_user_sync(user_id: int):
             (user_id, "")
         )
         conn.commit()
+        
         data = cursor.execute(
-            'SELECT balance, last_daily, current_game FROM users WHERE user_id = ?',
+            'SELECT user_id, balance, last_daily, current_game FROM users WHERE user_id = ?',
             (user_id,)
         ).fetchone()
+        
         if data:
-            return {"balance": data[0], "last_daily": data[1], "current_game": data[2]}
+            return {
+                "user_id": data[0],
+                "balance": data[1],
+                "last_daily": data[2],
+                "current_game": data[3]
+            }
         return None
 
-
 async def get_user(update):
+    """Асинхронная обертка для получения данных пользователя"""
+    # Определяем user_id в зависимости от типа объекта (Update или CallbackQuery)
     if isinstance(update, int):
         user_id = update
-    else:
+    elif hasattr(update, 'effective_user') and update.effective_user:
         user_id = update.effective_user.id
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _get_user_sync, user_id)
+    elif hasattr(update, 'from_user') and update.from_user:
+        # Для CallbackQuery
+        user_id = update.from_user.id
+    else:
+        return None
+        
+    return await asyncio.to_thread(_get_user_data_sync, user_id)
 
-
-def _save_balance_sync(user_id: int, new_balance: int | None, game: str | None = None):
+def _save_user_sync(user_id: int, new_balance: int | None, game: str | None):
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
-        if new_balance is None:
-            # Только сброс игры
+        if new_balance is None and game is None:
+            # Сброс игры без изменения баланса
             cursor.execute('UPDATE users SET current_game = NULL WHERE user_id = ?', (user_id,))
         elif game is not None:
-            # Баланс + активная игра
+            # Обновление баланса и установка активной игры
             cursor.execute(
                 'UPDATE users SET balance = ?, current_game = ? WHERE user_id = ?',
                 (new_balance, game, user_id),
             )
         else:
-            # Просто баланс, сбрасываем игру
+            # Просто обновление баланса (и сброс игры, если нужно)
             cursor.execute(
                 'UPDATE users SET balance = ?, current_game = NULL WHERE user_id = ?',
                 (new_balance, user_id),
             )
         conn.commit()
 
-
 async def save_balance(user_id: int, new_balance: int | None, game: str | None = None):
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _save_balance_sync, user_id, new_balance, game)
-
+    await asyncio.to_thread(_save_user_sync, user_id, new_balance, game)
 
 # --- КОМАНДЫ И МЕНЮ ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await main_menu(update, context)
 
-
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = await get_user(update)
+    
     keyboard = [
         [InlineKeyboardButton("💰 Баланс", callback_data="show_balance")],
         [InlineKeyboardButton("🎲 Казино", callback_data="casino")],
@@ -133,11 +146,11 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
     except AttributeError:
+        # Если вызываем из кнопки (CallbackQuery), у объекта нет message
         await update.callback_query.edit_message_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
 
-
 async def show_balance(query):
-    # query — это CallbackQuery, у него есть .message и .from_user
+    # query здесь - это CallbackQuery
     user_data = await get_user(query)
     if user_data is None:
         return
@@ -148,7 +161,6 @@ async def show_balance(query):
         parse_mode=constants.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
-
 
 async def casino_keyboard(query):
     game_buttons = [
@@ -161,7 +173,6 @@ async def casino_keyboard(query):
         parse_mode=constants.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(game_buttons),
     )
-
 
 # --- ОБРАБОТЧИК КНОПОК ---
 
@@ -191,11 +202,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "dice_roll": "Кости 🎲",
             }
             game_name = game_name_map[query.data]
+            
             user_data = await get_user(update)
             if user_data is None:
+                await query.edit_message_text("Ошибка: пользователь не найден.")
                 return
 
-            # Сохраняем активную игру в БД
+            # ВАЖНО: Сохраняем активную игру в БД
             await save_balance(user_data["user_id"], None, game=query.data)
 
             msg = (
@@ -220,7 +233,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case buy_item if buy_item.startswith("buy_"):
             await process_purchase(update, context)
 
-
 # --- ЛИДЕРЫ И ЕЖЕДНЕВНЫЙ БОНУС ---
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -237,14 +249,16 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"{i}. {name}: {bal:,} 🪙\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.date.today().isoformat()
     user_data = await get_user(update)
+    
     if user_data is None:
         return
 
     last_date_str = user_data["last_daily"]
+    
+    # Проверка: если даты нет или она не совпадает с сегодняшней
     if last_date_str is None or str(last_date_str) != str(today):
         bonus = DAILY_START
         new_balance = user_data["balance"] + bonus
@@ -272,7 +286,6 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="❌ Вы уже забрали бонус сегодня.",
             parse_mode="Markdown",
         )
-
 
 # --- МАГАЗИН ---
 
@@ -303,7 +316,6 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
-
 async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -325,6 +337,7 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     item_name, item_price = result
     user_data = await get_user(update)
+    
     if user_data is None:
         return
 
@@ -345,7 +358,6 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await main_menu(update, context)
 
-
 # --- ИГРОПРОВОДНИК ---
 
 async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -355,32 +367,14 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     selected_game = user_data.get("current_game")
     if not selected_game:
-        # Если нет активной игры — просто игнорируем или предлагаем меню
-        await update.message.reply_text("Сначала выберите игру в казино.", parse_mode="Markdown")
+        await update.message.reply_text("Сначала выберите игру в казино через кнопку 'Казино'.", parse_mode="Markdown")
         return
 
-    bet_text = update.message.text.replace(",", "").replace(" ", "")
+    # Очистка ввода: убираем пробелы, запятые, точки
+    bet_text = update.message.text.replace(",", "").replace(" ", "").replace(".", "")
+    
     try:
         bet = int(bet_text)
     except ValueError:
-        await update.message.reply_text("❌ Пожалуйста, введите числовое значение.", parse_mode="Markdown")
-        return
-
-    if bet <= 0:
-        await update.message.reply_text("Ставка должна быть больше нуля!", parse_mode="Markdown")
-        return
-
-    if bet > user_data["balance"]:
-        await update.message.reply_text("❌ Недостаточно средств на балансе.", parse_mode="Markdown")
-        return
-
-    result_msg = ""
-    win_amount = 0
-
-    # Логика игр
-    if selected_game == "coin_flip":
-        choice = random.choice(["орёл", "решка"])
-        coin = random.choice(["орёл", "решка"])
-        won = choice == coin
-        multiplier =
-
+        await update.message.reply_text("❌ Пожалуйста, введите целое число (сумму ставки).", parse_mode="
+                                        
