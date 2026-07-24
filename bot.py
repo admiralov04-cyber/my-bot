@@ -11,17 +11,30 @@ from telegram.ext import (
 import datetime
 import random
 
+# 📌 Импортируем библиотеку для работы с эмодзи
+import emoji
+
+
 # --- НАСТРОЙКИ ---
 DB_NAME = "casino.db"
 DAILY_START = 10_000
 DAILY_INCREMENT = 10_000
+
+# ⚙️ Загрузка токена из системной переменной API_TOKEN (Bothost создаёт её автоматически).
+import os
+TOKEN = os.getenv("API_TOKEN")
+if not TOKEN:
+    raise ValueError(
+        "🛑 Ошибка! Переменная окружения API_TOKEN не найдена."
+        "\nПроверьте настройки вашего сервера."
+    )
 
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-
+    
     # Основная таблица пользователей
     cursor.execute(
         """
@@ -33,7 +46,7 @@ def init_db():
         )
     """
     )
-
+    
     # Таблица магазина предметов
     cursor.execute(
         """
@@ -45,7 +58,7 @@ def init_db():
         )
     """
     )
-
+    
     # Заполним магазин базовыми предметами, если он пуст
     cursor.execute("SELECT COUNT(*) FROM shop")
     if cursor.fetchone()[0] == 0:
@@ -54,10 +67,8 @@ def init_db():
             ("Удвоитель опыта", 75_000, "💸 Временное удвоение всех выигрышей"),
             ("VIP-статус", 200_000, "🔑 Открывает эксклюзивные игры"),
         ]
-        cursor.executemany(
-            'INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', items
-        )
-
+        cursor.executemany('INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', items)
+        
     conn.commit()
     conn.close()
 
@@ -109,7 +120,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
     try:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(text, parse_mode="Markdown", reply_mark__markup=reply_markup)
     except Exception as e:
         print(e)
 
@@ -133,7 +144,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         case "daily":
             await daily(query, context)
-
+            
         case "shop":
             await show_shop(query, context)
 
@@ -151,7 +162,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                 ],
                 [
-                    InlineKeyboardButton(  # ❗️ Вот здесь мы добавили кнопку Отмены!
+                    InlineKeyboardButton(  
                         emoji.emojize(":back_arrow: Назад"), callback_data="cancel"
                     )
                 ],
@@ -226,7 +237,7 @@ async def daily(query, context: ContextTypes.DEFAULT_TYPE):
     new_balance = user_data["balance"] + bonus
 
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    cursor = conn.conn.cursor()
     cursor.execute(
         "UPDATE users SET balance = ?, last_daily = ? WHERE user_id = ?",
         (new_balance, today.isoformat(), user.id),
@@ -249,7 +260,7 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
     # Собираем кнопки товаров
     buttons = []
     for row in cur.execute("SELECT item_id, name, price FROM shop"):
-        item_id, name, price = row
+        item_id, name, _price = row
         buttons.append([InlineKeyboardButton(name, callback_data=f"buy_{item_id}")])
 
     # Добавляем кнопку возврата
@@ -373,7 +384,7 @@ def game_input_filter(_: Update, ctx: ContextTypes.DEFAULT_TYPE | None = None) -
 if __name__ == "__main__":
     init_db()
 
-    app = ApplicationBuilder().token("API_TOKEN").build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     # Регистрация обработчиков
     app.add_handler(CommandHandler("start", start))
@@ -387,4 +398,3 @@ if __name__ == "__main__":
 
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
-    
