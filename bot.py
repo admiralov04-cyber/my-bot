@@ -387,3 +387,4 @@ if __name__ == "__main__":
 
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
+    
