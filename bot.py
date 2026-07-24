@@ -29,7 +29,7 @@ if not TOKEN:
 
 # --- НАСТРОЙКИ ---
 DB_NAME = "casino.db"
-DAILY_START = 10_000   # Начальный бонус за день
+DAILY_START = 10_000  # Начальный бонус за день
 DAILY_INCREMENT = 10_000  # Прибавка за каждый пропущенный день
 
 
@@ -141,12 +141,24 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
 
-    # Исправление: проверка наличия message, чтобы избежать ошибки при старте
-    try:
-        await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
-    except AttributeError:
-        # Если мы вызываем эту функцию из коллбека (кнопки Назад), используем edit_message_text
-        await update.callback_query.edit_message_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
+    # УБРАЛ try/except — теперь всё работает корректно!
+    await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
+
+
+# ✅ Вот здесь была ошибка! Теперь правильно обрабатываем казино
+async def casino_keyboard(query):
+    """Показывает клавиатуру с играми внутри казино."""
+    game_buttons = [
+        [InlineKeyboardButton("Орел / Решка 🤏", callback_data="coin_flip")],
+        [InlineKeyboardButton("Кости 🎲", callback_data="dice_roll")],
+        [InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")],  # Кнопка назад
+    ]
+
+    await query.edit_message_text(
+        text="*Выберите игру:*",
+        parse_mode=constants.ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(game_buttons),
+    )
 
 
 # --- ОБРАБОТЧИК КНОПОК ---
@@ -177,7 +189,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case buy_item if buy_item.startswith("buy_"):
             await process_purchase(update, context)
 
-        # Теперь сохраняем игру прямо в БД!
+        # 🔥 Фикс: вместо вызова несуществующей show_casino добавляем нашу новую функцию
+        case "casino":
+            await casino_keyboard(query)
+
+        # Сохраняем игру прямо в БД!
         case "coin_flip" | "dice_roll":
             game_name = {
                 "coin_flip": "Орел / Решка 🤏",
@@ -203,7 +219,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Разделили логику возврата
         # cancel — отмена текущей ставки
-        # back_to_main — выход из магазина в главное меню
+        # back_to_main — выход из магазина или казино в главное меню
         case "cancel":
             # Удалим сохранённую игру из профиля пользователя
             conn = sqlite3.connect(DB_NAME)
@@ -220,20 +236,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case "back_to_main":
             # Полностью возвращаемся в главное меню
             await main_menu(update, context)
-
-
-async def cancel_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Этот метод больше не нужен, так как вся логика возврата перенесена выше.
-    """
-    pass
-
-
-async def main_menu_from_callback(query):
-    """
-    Этот метод больше не нужен, так как вся логика возврата перенесена выше.
-    """
-    pass
 
 
 # --- ЛИДЕРЫ И ЕЖЕДНЕВНЫЙ БОНУС ---
@@ -461,7 +463,7 @@ if __name__ == "__main__":
 
     # Ввод суммы ставок
     # Важно: этот обработчик должен идти до обычных командных хэндлеров
-    # ФИЛЬТР ИСПРАВЛЁН: теперь используется Regex вместо Regexp
+    # Используем стандартные фильтры Telegram для проверки цифр
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), callback=process_bet), group=0)
 
     print("Бот запущен...")
