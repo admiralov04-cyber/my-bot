@@ -120,17 +120,31 @@ async def get_user(user_id_or_update):
         return None
 
 
-async def save_balance(user_id: int, amount: int):
-    """Обновляет баланс пользователя."""
+# Фикс ошибки был тут ↓↓↓
+async def save_balance(user_id: int, new_balance: int | None):
+    """
+    Обновляет баланс пользователя.
+    Если передан None вместо new_balance — сбрасывает поле current_game.
+    """
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                '''
-                UPDATE users SET balance = ? WHERE user_id = ?
-                ''',
-                (amount, user_id),
-            )
+
+            # Если нам нужно только сбросить игру без изменения баланса
+            if new_balance is None:
+                cursor.execute(
+                    '''
+                    UPDATE users SET current_game = NULL WHERE user_id = ?
+                    ''',
+                    (user_id,)
+                )
+            else:
+                cursor.execute(
+                    '''
+                    UPDATE users SET balance = ?, current_game = NULL WHERE user_id = ?
+                    ''',  # Сбросим игру сразу при изменении баланса
+                    (new_balance, user_id),
+                )
             conn.commit()
     except Exception as e:
         print(f"❗️ Error saving balance for user {user_id}: {str(e)}")
@@ -144,9 +158,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главное меню с кнопками."""
-    user_data = await get_user(update)
+    user_data = await get_user(update=update)
 
-    # Кнопка Баланса теперь открывает отдельное окно
     keyboard = [
         [InlineKeyboardButton("💰 Баланс", callback_data="show_balance")],
         [InlineKeyboardButton("🎲 Казино", callback_data="casino")],
@@ -215,9 +228,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Передаём именно ID пользователя, а не весь update
             await daily(query.from_user.id, context)
 
-        case "shop":
-            await show_shop(query, context)
-
         # Нажатие на кнопку "Казино" в главном меню
         case "casino":
             # Просто открываем клавиатуру с играми
@@ -237,14 +247,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
                 f"Текущий баланс: *{user_data['balance']:,}* 🪙"  
             )
-            await query.edit_message_text(msg, parse_mode="Markdown")  # Без клавиатуры
+            await query.edit_message_text(msg, parse_mode="constants.ParseMode.MARKDOWN)  # Без клавиатуры
 
         # Разделили логику возврата
         # cancel — отмена текущей ставки
         # back_to_main — выход из магазина или списка игр в главное меню
         case "cancel":
             # Удалим сохранённую игру из профиля пользователя
-            await save_balance(query.from_user.id, None) # Специально передаю None, чтобы сбросить игру
+            await save_balance(query.from_user.id, None)  # <-- Исправлено: передаю None
             # Оставаемся в текущем сообщении, ждём новую ставку
             await query.answer("Ставка отменена.")
 
@@ -273,10 +283,11 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-async def daily(user_id: int, context: ContextTypes.DEFAULT_TYPE): # <-- Сигнатура изменена
+# Фикс ошибки был здесь ↓↓↓
+async def daily(user_id: int, context: ContextTypes.DEFAULT_TYPE): # <-- Сигнатура верная
     today = datetime.date.today().isoformat()
     
-    user_data = await get_user(user_id)
+    user_data = await get_user(user_id=user_id)
     if user_data is None:
         return
 
@@ -388,6 +399,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Эта функция срабатывает при вводе любой цифры от пользователя.
     Она проверит, есть ли у него активная игра, и обработает ставку.
     """
+    # Получаем полную информацию о пользователе
     user_data = await get_user(update.effective_user.id)
     if user_data is None:
         return
