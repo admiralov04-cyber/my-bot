@@ -114,7 +114,7 @@ async def get_user(update):
                 (user_id,)
             ).fetchone()
         
-        return {"balance": data[0], "last_daily": data[1], "current_game": data[2]}
+        return {"balance": data[0], "last_daily": data[1], "current_game": data[2]} # Ключи словаря
     except Exception as e:
         print(f"❗️ Error in DB query for user {user_id}: {str(e)}")
         return None
@@ -226,7 +226,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Обработка ежедневного бонуса
         case "daily":
             # Вот тут была ошибка! Нужно передавать именно объект Update, а не разбирать его вручную
-            await daily(update, context) # <-- Фикс: передаю весь update
+            await daily(update, context) # <--- Фикс: передаю весь update
 
         case "shop":
             await show_shop(query, context)
@@ -259,7 +259,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # back_to_main — выход из магазина или списка игр в главное меню
         case "cancel":
             # Удалим сохранённую игру из профиля пользователя
-            await save_balance(query.from_user.id, None)  # <-- Исправлено: передаю None
+            # Фикс здесь ↓↓↓ Используем корректный ключ!
+            await save_balance(user_data=user_data["user_id"], new_balance=None)  
             # Оставаемся в текущем сообщении, ждём новую ставку
             await query.answer("Ставка отменена.")
 
@@ -306,7 +307,8 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- Си�
         bonus = DAILY_START
         new_balance = user_data["balance"] + bonus
 
-        await save_balance(user_data["id"], new_balance)
+        # Фикс здесь ↓↓↓ Используем корректный ключ!
+        await save_balance(user_id=user_data["user_id"], new_balance=new_balance)  
 
         # Отправляем ответ пользователю
         await context.bot.send_message(
@@ -388,7 +390,8 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Покупка успешна
     new_balance = current_balance - item_price
-    await save_balance(user_data["id"], new_balance)
+    # Фикс здесь ↓↓↓ Используем корректный ключ!
+    await save_balance(user_id=user_data["user_id"], new_balance=new_balance)  
 
     # Сообщение об успехе
     await query.edit_message_text(
@@ -466,7 +469,8 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_balance = user_data["balance"] + win_amount - bet
 
     # Сохраняем изменения баланса И УДАЛЯЕМ АКТИВНУЮ ИГРУ
-    await save_balance(user_data["id"], new_balance)
+    # Фикс здесь ↓↓↓ Используем корректный ключ!
+    await save_balance(user_id=user_data["user_id"], new_balance=new_balance)  
 
     # Новые кнопки для результата игры
     play_again_buttons = [
