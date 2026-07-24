@@ -10,14 +10,6 @@ from telegram.ext import (
 )
 import datetime
 import random
-import logging  # Логирование ошибок
-
-
-# Настройка логирования
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 
 # ⚙️ Загрузка токена из системной переменной API_TOKEN (Bothost создаёт её автоматически).
@@ -65,9 +57,9 @@ def init_db():
     # Заполним магазин базовыми предметами, если он пуст
     if cursor.execute('SELECT COUNT(*) FROM shop').fetchone()[0] == 0:
         items = [
-            ('Счастливая монета', 50_000, '🎲 Увеличивает шанс выигрыша'),
-            ('Удвоитель опыта', 75_000, '💸 Временное удвоение всех выигрышей'),
-            ('VIP-статус', 200_000, '🔑 Открывает эксклюзивные игры'),
+            ('Счастливая монета', 50_000, 'Увеличивает шанс выигрыша'),
+            ('Удвоитель опыта', 75_000, 'Временное удвоение всех выигрышей'),
+            ('VIP-статус', 200_000, 'Открывает эксклюзивные игры'),
         ]
         cursor.executemany('INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', items)
         
@@ -134,17 +126,16 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
         [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
-        [InlineKeyboardButton('Магазин 🛍️', callback_data='shop')],
-        [InlineKeyboardButton('Ежедневный бонус 🗓', callback_data='daily')]
+        [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
+        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
     try:
-        # Используем обычный Markdown для избежания проблем с эмодзи в начале строки
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN, reply_markup=reply_markup)
     except Exception as e:
-        logger.error(e)
+        print(e)
 
 
 # --- ОБРАБОТЧИК КНОПОК ---
@@ -161,7 +152,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data = await get_user(update)
             await query.edit_message_text(
                 text=f"Твой текущий баланс: *{user_data['balance']:,}* 🪙",
-                parse_mode="Markdown"  # Обычный markdown
+                parse_mode="Markdown"  
             )
 
         case 'daily':
@@ -169,6 +160,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         case 'shop':
             await show_shop(query, context)
+
+        # Обработка покупок товаров
+        case buy_item if buy_item.startswith('buy_'):
+            await process_purchase(update, context)
+
+        case 'cancel':
+            # Отмена выбора игры и возврат в главное меню
+            del context.user_data['selected_game']
+            await main_menu_from_callback(query)
 
         case 'casino':
             casino_keybutton = [
@@ -178,7 +178,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             await query.edit_message_text(
                 text="*Выберите игру:*",
-                parse_mode="Markdown",  # Обычный markdown
+                parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(casino_keybutton)
             )
             
@@ -188,7 +188,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'dice_roll': 'Кости 🎲'
             }[query.data]
 
-            # ВНИМАНИЕ! Здесь была ваша ошибка со скобкой!
             # Сначала получаем данные синхронно, а потом формируем строку
             user_data = await get_user(update)
             msg = (
@@ -199,15 +198,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Сохраняем выбранную игру в контекст, чтобы потом её обработать
             context.user_data['selected_game'] = query.data
 
-        case 'cancel':
-            # Отмена выбора игры и возврат в главное меню
-            del context.user_data['selected_game']
-            await main_menu_from_callback(query)
-
-
 async def cancel_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отменяет выбор игры и возвращает в главное меню."""
-    query = update.callback_rule.query
+    query = update.callback_query
     await query.answer()
 
     # Удалим сохранённую игру из контекста
@@ -223,8 +216,8 @@ async def main_menu_from_callback(query):
     keyboard = [
         [InlineKeyboardButton(f'💰 Баланс: {user_data["balance"]:,} 🪙', callback_data='balance')],
         [InlineKeyboardButton('🎲 Казино', callback_data='casino')],
-        [InlineKeyboardButton('Магазин 🛍️', callback_data='shop')],
-        [InlineKeyboardButton('Ежедневный бонус 🗓', callback_data='daily')]
+        [InlineKeyboardButton('🛍 Магазин', callback_data='shop')],
+        [InlineKeyboardButton('🗓 Ежедневный бонус', callback_data='daily')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"Привет, *{query.from_user.first_name}*!\nВыбери действие:"
@@ -313,36 +306,81 @@ async def show_shop(query, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         text=text,
-        # Используем обычный Markdown — это самый надёжный вариант
         parse_mode=constants.ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
+
+
+# ✍️ Новый хендлер для обработки покупок
+async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    # Извлекаем ID товара из callback_data
+    _, item_id = query.data.split('_')
+    item_id = int(item_id)
+
+    # Получаем информацию о товаре
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, price FROM shop WHERE item_id = ?", (item_id,))
+    result = cursor.fetchone()
+    if not result:
+        await query.edit_message_text("Ошибка: товар не найден!")
+        return
+
+    item_name, item_price = result
+
+    # Проверяем баланс пользователя
+    user_data = await get_user(update)
+    current_balance = user_data['balance']
+
+    if current_balance < item_price:
+        await query.edit_message_text(f"❌ Недостаточно средств для покупки '{item_name}'. Ваш баланс: {current_balance:,}")
+        return
+
+    # Покупка успешна
+    new_balance = current_balance - item_price
+    await save_balance(update.effective_user.id, new_balance)
+
+    # Сообщение об успехе
+    await query.edit_message_text(
+        f"✅ Вы купили '{item_name}' за {item_price:,} монет!\nВаш новый баланс: *{new_balance:,}* 🪙",
+        parse_mode=constants.ParseMode.MARKDOWN
+    )
+
+    # Возвращаемся в главное меню
+    await main_menu_from_callback(query)
 
 
 # --- ИГРОПРОВОДНИК —
 
 async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Эта функция срабатывает только тогда, когда пользователь ввёл число после того, как выбрал одну из игр.
+    Эта функция срабатывает только тогда, когда пользователь ввёл число
+    после того, как выбрал одну из игр.
     """
     selected_game = context.user_data.get('selected_game')
     if not selected_game:
         return  # Игнорируем любые сообщения без выбранной игры
 
     bet_text = update.message.text.replace(',', '').replace(' ', '')
+
+    # Пытаемся преобразовать введённое значение в целое число
     try:
         bet = int(bet_text)
     except ValueError:
-        # Игнорируем всё, что нельзя превратить в целое положительное число
+        # Пользователь отправил текст вместо цифры
+        await update.message.reply_text("❌ Пожалуйста, введите числовое значение.", parse_mode="Markdown")
         return
 
     if bet <= 0:
-        await update.message.reply_text("Ставка должна быть больше нуля!")
+        await update.message.reply_text("Ставка должна быть больше нуля!", parse_mode="Markdown")
         return
 
     user_data = await get_user(update)
     if bet > user_data['balance']:
-        await update.message.reply_text("❌ Недостаточно средств на балансе.")
+        await update.message.reply_text("❌ Недостаточно средств на балансе.", parse_mode="Markdown")
         return
 
     result_msg = ""
@@ -397,11 +435,11 @@ def game_input_filter(_: Update, ctx: ContextTypes.DEFAULT_TYPE | None = None) -
     а также у которого есть активная игра в контексте (`selected_game`).
     Это предотвращает случайные ошибки.
     """
+    # Убираем проверку типа чата (private). Бот должен работать везде.
     return (
         ctx is not None and
         ctx.user_data.get('selected_game') is not None and
         _.message is not None and
-        _.effective_chat.type == "private" and
         _.message.text.isdigit()
     )
 
