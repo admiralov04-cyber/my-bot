@@ -165,6 +165,7 @@ async def start(update, context):
     await update.message.reply_text(f"🎰 Lucky Casino\n\nПривет, {u.first_name}!\n🏦 Казна: {TREASURY:,}\n\nНапиши 'ограбить казну'", reply_markup=InlineKeyboardMarkup(kb))
 
 async def buttons(update, context):
+    global TREASURY
     q = update.callback_query
     try:
         await q.answer()
@@ -217,7 +218,6 @@ async def buttons(update, context):
         kb = [[InlineKeyboardButton(f"📦 Обычный - {CASES['common']['price']:,}", callback_data="oc")], [InlineKeyboardButton(f"🎁 Редкий - {CASES['rare']['price']:,}", callback_data="or")], [InlineKeyboardButton(f"💎 Эпический - {CASES['epic']['price']:,}", callback_data="oe")], [InlineKeyboardButton(f"👑 Легендарный - {CASES['legendary']['price']:,}", callback_data="ol")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
         await q.edit_message_text(f"🎁 Кейсы\n🏦 {TREASURY:,}", reply_markup=InlineKeyboardMarkup(kb))
     elif d in ["oc", "or", "oe", "ol"]:
-        global TREASURY
         ct = {"oc": "common", "or": "rare", "oe": "epic", "ol": "legendary"}[d]
         case = CASES[ct]
         if user["balance"] < case["price"]:
