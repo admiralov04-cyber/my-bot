@@ -72,27 +72,31 @@ def init_db():
         print(f"[ERROR] Failed to initialize database: {e}")
 
 
-async def get_user(update):
+async def get_user(update_or_context):
     """
     Получаем данные пользователя из базы.
-    Возвращает словарь с ключами: user_id, username, balance, last_daily, current_game
+    Может принимать update или context (для MessageHandler)
     """
     try:
-        if isinstance(update, int):
-            user_id = update
-        elif hasattr(update, 'effective_user'):
-            user_id = update.effective_user.id
-        elif hasattr(update, 'from_user'):
-            user_id = update.from_user.id
+        # Определяем user_id из разных источников
+        if isinstance(update_or_context, int):
+            user_id = update_or_context
+            username = ""
+        elif hasattr(update_or_context, 'effective_user') and update_or_context.effective_user:
+            user_id = update_or_context.effective_user.id
+            username = update_or_context.effective_user.username or ""
+        elif hasattr(update_or_context, 'from_user') and update_or_context.from_user:
+            user_id = update_or_context.from_user.id
+            username = update_or_context.from_user.username or ""
+        elif hasattr(update_or_context, 'message') and update_or_context.message:
+            user_id = update_or_context.message.from_user.id
+            username = update_or_context.message.from_user.username or ""
         else:
-            user_id = update.message.from_user.id
+            print("Cannot determine user_id")
+            return None
 
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
-            
-            username = ""
-            if hasattr(update, 'effective_user') and update.effective_user.username:
-                username = update.effective_user.username
             
             cursor.execute(
                 'INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)',
@@ -101,8 +105,8 @@ async def get_user(update):
             
             if username:
                 cursor.execute(
-                    'UPDATE users SET username = ? WHERE user_id = ? AND username != ?',
-                    (username, user_id, username)
+                    'UPDATE users SET username = ? WHERE user_id = ?',
+                    (username, user_id)
                 )
             
             conn.commit()
@@ -127,10 +131,7 @@ async def get_user(update):
 
 
 async def save_balance(user_id: int, new_balance: int | None):
-    """
-    Обновляет баланс пользователя.
-    Если передан None вместо new_balance — сбрасывает поле current_game.
-    """
+    """Обновляет баланс пользователя"""
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
@@ -160,6 +161,7 @@ async def set_current_game(user_id: int, game_name: str):
                 (game_name, user_id)
             )
             conn.commit()
+            print(f"Game set: {game_name} for user {user_id}")
     except Exception as e:
         print(f"Error setting game for user {user_id}: {str(e)}")
 
@@ -257,13 +259,15 @@ async def game_bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_data is None:
         return
     
+    # Сохраняем выбранную игру
     await set_current_game(user_data['user_id'], query.data)
     
     keyboard = [[InlineKeyboardButton("↩️ Отмена", callback_data="cancel_bet")]]
     
     msg = (
         f"Введите сумму ставки для игры \"*{game_name}*\":\n\n"
-        f"Текущий баланс: *{user_data['balance']:,}* 🪙"
+        f"Текущий баланс: *{user_data['balance']:,}* 🪙\n\n"
+        f"✏️ *Просто напишите число в чат*"
     )
     
     await query.edit_message_text(
@@ -279,6 +283,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Главный обработчик всех кнопок"""
     query = update.callback_query
     await query.answer()
+
+    print(f"Button pressed: {query.data}")
 
     if query.data == "mainmenu":
         await main_menu(update, context)
@@ -296,7 +302,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data = await get_user(update)
         if user_data:
             await save_balance(user_id=user_data["user_id"], new_balance=None)
-            await query.edit_message_text("❌ Ставка отменена.")
+            await query.edit_message_text("❌ Ставка отменена. Выберите действие:", reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎲 В казино", callback_data="casino")],
+                [InlineKeyboardButton("↩️ Главное меню", callback_data="mainmenu")]
+            ]))
     elif query.data.startswith("buy_"):
         await process_purchase(update, context)
 
@@ -459,43 +468,58 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Ошибка при обработке покупки.")
 
 
-# --- ОБРАБОТКА СТАВОК ---
+# --- ОБРАБОТКА СТАВОК (ИСПРАВЛЕННАЯ ВЕРСИЯ) ---
 
 async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает ставку пользователя"""
-    user_data = await get_user(update)
+    print("Processing bet...")
+    
+    # Получаем данные пользователя
+    user_data = await get_user(update.message.from_user.id)
     if user_data is None:
+        print("User data is None")
+        await update.message.reply_text("❌ Ошибка получения данных пользователя.")
         return
 
+    # Проверяем, есть ли активная игра
     selected_game = user_data.get("current_game")
+    print(f"Current game: {selected_game}")
+    
     if not selected_game:
+        # Если нет активной игры, игнорируем число
         return
 
-    bet_text = update.message.text.replace(",", "").replace(" ", "")
+    # Получаем текст ставки
+    bet_text = update.message.text.strip()
+    print(f"Bet text: {bet_text}")
 
+    # Пытаемся преобразовать в число
     try:
         bet = int(bet_text)
     except ValueError:
         await update.message.reply_text(
-            "❌ Пожалуйста, введите целое число (сумму ставки).",
+            "❌ Пожалуйста, введите целое число.",
             parse_mode="Markdown"
         )
         return
 
+    # Проверяем ставку
     if bet <= 0:
         await update.message.reply_text(
-            "Ставка должна быть больше нуля!",
+            "❌ Ставка должна быть больше нуля!",
             parse_mode="Markdown"
         )
         return
 
     if bet > user_data["balance"]:
         await update.message.reply_text(
-            "❌ Недостаточно средств на балансе.",
+            f"❌ Недостаточно средств на балансе.\n"
+            f"Ваш баланс: {user_data['balance']:,} 🪙",
             parse_mode="Markdown"
         )
         return
 
+    # Обрабатываем игру
     result_msg = ""
     win_amount = 0
 
@@ -503,12 +527,12 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         coin = random.choice(["орёл", "решка"])
         won = random.choice([True, False])
         
-        result_msg = f"🤏 Выпал *{coin}*."
+        result_msg = f"🤏 Монетка: *{coin}*"
         if won:
-            win_amount = int(bet * 2)
-            result_msg += " Вы угадали! Победа!"
+            win_amount = bet * 2
+            result_msg += "\n✅ Вы угадали! Победа!"
         else:
-            result_msg += " Вы не угадали. Проигрыш."
+            result_msg += "\n❌ Вы не угадали. Проигрыш."
 
     elif selected_game == "dice_roll":
         dice1 = random.randint(1, 6)
@@ -517,30 +541,35 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if total % 2 == 0:
             win_amount = bet * 2
-            result_msg = f"🎲 Выпало {dice1} + {dice2} = *{total}* (Чет). Победа!"
+            result_msg = f"🎲 Кубики: {dice1} + {dice2} = *{total}* (Чёт)\n✅ Победа!"
         else:
-            result_msg = f"🎲 Выпало {dice1} + {dice2} = *{total}* (Нечет). Проигрыш."
+            result_msg = f"🎲 Кубики: {dice1} + {dice2} = *{total}* (Нечет)\n❌ Проигрыш."
 
+    # Считаем новый баланс
     new_balance = user_data["balance"] - bet + win_amount
+    
+    # Сохраняем баланс и сбрасываем игру
     await save_balance(user_id=user_data["user_id"], new_balance=new_balance)
 
+    # Создаем кнопки
     play_again_buttons = [
         [InlineKeyboardButton("🎲 Играть снова", callback_data="casino")],
         [InlineKeyboardButton("↩️ Главное меню", callback_data="mainmenu")]
     ]
 
+    # Формируем сообщение с результатом
     if win_amount > 0:
         profit = win_amount - bet
         summary = (
             f"{result_msg}\n\n"
-            f"Выигрыш: +{profit:,} 🪙\n"
-            f"Новый баланс: *{new_balance:,}* 🪙"
+            f"💎 Выигрыш: +{profit:,} 🪙\n"
+            f"💰 Новый баланс: *{new_balance:,}* 🪙"
         )
     else:
         summary = (
             f"{result_msg}\n\n"
-            f"Потеряно: -{bet:,} 🪙\n"
-            f"Новый баланс: *{new_balance:,}* 🪙"
+            f"💸 Потеряно: -{bet:,} 🪙\n"
+            f"💰 Новый баланс: *{new_balance:,}* 🪙"
         )
         
     await update.message.reply_text(
@@ -548,15 +577,7 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(play_again_buttons)
     )
-
-
-# --- ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ ---
-
-async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик неизвестных сообщений"""
-    await update.message.reply_text(
-        "❓ Неизвестная команда. Используйте /start для начала работы с ботом."
-    )
+    print("Bet processed successfully")
 
 
 # --- ЗАПУСК БОТА ---
@@ -572,14 +593,14 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top", top))
 
-    # Обработчик всех кнопок
+    # Обработчик кнопок
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # Обработчик ввода ставок (только числа)
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), process_bet))
-
-    # Обработчик неизвестных сообщений (должен быть последним)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
+    # Обработчик текстовых сообщений (должен быть ДО обработчика ставок)
+    # Сначала проверяем, есть ли активная игра - если да, обрабатываем как ставку
+    # Если нет - просто игнорируем
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_bet))
 
     print("Bot is starting...")
+    print("Token:", TOKEN[:10] + "..." if TOKEN else "No token")
     app.run_polling(drop_pending_updates=True)
