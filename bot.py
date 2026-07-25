@@ -166,6 +166,7 @@ def collect_biz_income(user):
     return income
 
 def pay_taxes(user):
+    global TREASURY
     tax = user.get("tax_balance", 0)
     if tax <= 0:
         return "✅ Нет неоплаченных налогов!"
@@ -177,8 +178,9 @@ def pay_taxes(user):
     remaining = tax - from_balance
     if remaining > 0:
         user["bank_balance"] = user.get("bank_balance", 0) - remaining
-    global TREASURY
     TREASURY += tax
+    if TREASURY > TREASURY_LIMIT:
+        TREASURY = TREASURY_LIMIT
     user["tax_balance"] = 0
     save_db()
     return f"✅ Налоги оплачены: {tax:,} 🪙"
@@ -322,6 +324,25 @@ def show_profile(user, uid):
     ]
     return txt, kb
 
+def show_businesses(user):
+    biz_info = get_biz_info(user)
+    txt = f"🏪 Бизнесы ({biz_info['count']}/{biz_info['max']})\n\n"
+    if biz_info['count'] > 0:
+        txt += "✅ Ваши:\n"
+        for biz_id in user.get("businesses", []):
+            biz = BUSINESSES.get(biz_id)
+            if biz:
+                txt += f"• {biz['name']}: +{biz['income']:,}/ч\n"
+        txt += f"\n💰 Доход: {biz_info['total_income']:,}/ч\n\n"
+    else:
+        txt += "У вас нет бизнесов!\n\n"
+    txt += "📋 Доступные:\n\n"
+    for biz_id, biz in BUSINESSES.items():
+        owned = biz_id in user.get("businesses", [])
+        txt += f"{biz_id}. {biz['name']}\n💰 {biz['income']:,}/ч | 💵 {biz['price']:,} 🪙\n{'✅' if owned else '❌'}\n\n"
+    txt += "Покупка: купить бизнес [номер]"
+    return txt
+
 def get_main_keyboard(uid):
     kb = [
         [InlineKeyboardButton("👤 Профиль", callback_data="p")],
@@ -376,23 +397,17 @@ async def buttons(update, context):
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
     elif d == "vip_info":
-        txt = ""
         vip_active = is_vip_active(user)
         if vip_active:
             until = datetime.datetime.fromisoformat(user["vip_until"])
             days_left = (until - datetime.datetime.now()).days
-            txt = f"💎 *VIP АКТИВЕН*\n\n👑 Дней осталось: `{days_left}`\n📅 До: `{until.strftime('%d.%m.%Y')}`\n\n🎁 Бонусы:\n• x3 выигрыши\n• +40% к ограблению\n• x5 бонус\n• -50% налоги"
+            txt = f"💎 *VIP АКТИВЕН*\n\n👑 Дней: `{days_left}`\n📅 До: `{until.strftime('%d.%m.%Y')}`\n\n🎁 Бонусы:\n• x3 выигрыши\n• +40% к ограблению\n• x5 бонус\n• -50% налоги"
         else:
             txt = f"💎 *VIP-СТАТУС*\n\n❌ Не активирован\n\n💵 Цена: `{VIP_PRICE}₽` на `{VIP_DAYS}` дней\n\n🎁 Бонусы:\n• 🔥 x3 выигрыши\n• 🦹 +40% к ограблению\n• 🎁 x5 бонус\n• 💸 -50% налоги\n\n[Оплатить через СБП]({SBP_LINK})\n\nОтправьте `донат` после оплаты!"
         await q.edit_message_text(txt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Назад", callback_data="mn")]]), disable_web_page_preview=True)
     
     elif d == "c":
-        kb = [
-            [InlineKeyboardButton("🪙 Монетка", callback_data="gc")],
-            [InlineKeyboardButton("🎲 Кости", callback_data="gd")],
-            [InlineKeyboardButton("🎰 Слоты", callback_data="gs")],
-            [InlineKeyboardButton("↩️ Назад", callback_data="mn")]
-        ]
+        kb = [[InlineKeyboardButton("🪙 Монетка", callback_data="gc")], [InlineKeyboardButton("🎲 Кости", callback_data="gd")], [InlineKeyboardButton("🎰 Слоты", callback_data="gs")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
         await q.edit_message_text(f"🎰 Казино\n💰 {user['balance']:,}", reply_markup=InlineKeyboardMarkup(kb))
     
     elif d == "m":
@@ -417,11 +432,7 @@ async def buttons(update, context):
     
     elif d == "bc":
         ok, price = bc(user)
-        if ok:
-            await q.answer(f"✅ Куплена! Карт: {mi(user)['cards']} шт.")
-        else:
-            await q.answer(f"❌ Нужно {price:,} 🪙")
-        # Обновляем страницу майнинга
+        await q.answer(f"✅ Куплена! Карт: {mi(user)['cards']} шт." if ok else f"❌ Нужно {price:,} 🪙")
         cm(user)
         user = get_user(uid)
         info = mi(user)
@@ -442,13 +453,7 @@ async def buttons(update, context):
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
     elif d == "cs":
-        kb = [
-            [InlineKeyboardButton(f"📦 Обычный - {CASES['common']['price']:,}", callback_data="oc")],
-            [InlineKeyboardButton(f"🎁 Редкий - {CASES['rare']['price']:,}", callback_data="or")],
-            [InlineKeyboardButton(f"💎 Эпический - {CASES['epic']['price']:,}", callback_data="oe")],
-            [InlineKeyboardButton(f"👑 Легендарный - {CASES['legendary']['price']:,}", callback_data="ol")],
-            [InlineKeyboardButton("↩️ Назад", callback_data="mn")]
-        ]
+        kb = [[InlineKeyboardButton(f"📦 Обычный - {CASES['common']['price']:,}", callback_data="oc")], [InlineKeyboardButton(f"🎁 Редкий - {CASES['rare']['price']:,}", callback_data="or")], [InlineKeyboardButton(f"💎 Эпический - {CASES['epic']['price']:,}", callback_data="oe")], [InlineKeyboardButton(f"👑 Легендарный - {CASES['legendary']['price']:,}", callback_data="ol")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
         await q.edit_message_text("🎁 Кейсы\n\nВыберите кейс:", reply_markup=InlineKeyboardMarkup(kb))
     
     elif d in ["oc", "or", "oe", "ol"]:
@@ -469,10 +474,7 @@ async def buttons(update, context):
         txt = f"🎁 {case['name']}\n\n💰 Выигрыш: +{reward:,} 🪙\n💳 Баланс: {user['balance']:,}"
         if reward == case["rewards"][-1]:
             txt = "🔥 ДЖЕКПОТ!\n\n" + txt
-        kb = [
-            [InlineKeyboardButton("🎁 Ещё кейс", callback_data="cs")],
-            [InlineKeyboardButton("↩️ Меню", callback_data="mn")]
-        ]
+        kb = [[InlineKeyboardButton("🎁 Ещё кейс", callback_data="cs")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
     elif d in ["gc", "gd", "gs"]:
@@ -512,13 +514,7 @@ async def buttons(update, context):
     
     elif d == "a" and admin:
         txt = f"⚙️ Админ-панель\n\n👥 Игроков: {len(DB)}\n🏦 Казна: {TREASURY:,} 🪙\n📋 Заявок VIP: {len(DONATE_REQUESTS)}"
-        kb = [
-            [InlineKeyboardButton("👥 Список игроков", callback_data="au")],
-            [InlineKeyboardButton("💰 Выдать валюту", callback_data="ag")],
-            [InlineKeyboardButton("📋 Заявки VIP", callback_data="avip")],
-            [InlineKeyboardButton("📢 Рассылка", callback_data="as")],
-            [InlineKeyboardButton("↩️ Меню", callback_data="mn")]
-        ]
+        kb = [[InlineKeyboardButton("👥 Список игроков", callback_data="au")], [InlineKeyboardButton("💰 Выдать валюту", callback_data="ag")], [InlineKeyboardButton("📋 Заявки VIP", callback_data="avip")], [InlineKeyboardButton("📢 Рассылка", callback_data="as")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
     elif d == "avip" and admin:
@@ -537,7 +533,6 @@ async def buttons(update, context):
             give_vip(DB[target])
             await q.answer(f"✅ VIP выдан {DB[target]['name']}!")
             del DONATE_REQUESTS[target]
-        # Обновляем список
         if DONATE_REQUESTS:
             kb = []
             for req_id, req in list(DONATE_REQUESTS.items())[:20]:
@@ -590,10 +585,7 @@ async def messages(update, context):
             await update.message.reply_text("❌ У вас уже активен VIP!")
             return
         DONATE_REQUESTS[uid] = {"name": user["name"], "date": datetime.datetime.now().strftime("%d.%m.%Y %H:%M")}
-        await update.message.reply_text(
-            f"📋 *Заявка на VIP*\n\n💵 Стоимость: `{VIP_PRICE}₽`\n📅 Срок: `{VIP_DAYS}` дней\n\n[Оплатить через СБП]({SBP_LINK})\n\n✅ После оплаты админ активирует VIP!\n🆔 Ваш ID: `{uid}`",
-            parse_mode='Markdown', disable_web_page_preview=True
-        )
+        await update.message.reply_text(f"📋 Заявка на VIP\n\n💵 Стоимость: {VIP_PRICE}₽\n📅 Срок: {VIP_DAYS} дней\n\nОплатить через СБП:\n{SBP_LINK}\n\n✅ После оплаты админ активирует VIP!\n🆔 Ваш ID: {uid}", disable_web_page_preview=True)
         for aid in ADMIN_IDS:
             try:
                 await context.bot.send_message(chat_id=int(aid), text=f"📋 Новая заявка на VIP!\n👤 {user['name']} (ID: {uid})")
@@ -606,10 +598,10 @@ async def messages(update, context):
         if vip_active:
             until = datetime.datetime.fromisoformat(user["vip_until"])
             days_left = (until - datetime.datetime.now()).days
-            txt = f"💎 *VIP АКТИВЕН*\n\n👑 Дней: `{days_left}`\n📅 До: `{until.strftime('%d.%m.%Y')}`"
+            txt = f"💎 VIP АКТИВЕН\n\n👑 Дней: {days_left}\n📅 До: {until.strftime('%d.%m.%Y')}"
         else:
-            txt = f"💎 *VIP*\n\n❌ Не активен\n💵 Цена: `{VIP_PRICE}₽`\n\n[Оплатить через СБП]({SBP_LINK})\nОтправьте `донат` после оплаты!"
-        await update.message.reply_text(txt, parse_mode='Markdown', disable_web_page_preview=True)
+            txt = f"💎 VIP\n\n❌ Не активен\n💵 Цена: {VIP_PRICE}₽\n\nОплатить: {SBP_LINK}\nОтправьте донат после оплаты!"
+        await update.message.reply_text(txt, disable_web_page_preview=True)
         return
 
     if text == "банк":
@@ -760,13 +752,7 @@ async def messages(update, context):
     user["current_game"] = None
     save_db()
 
-    await update.message.reply_text(
-        f"{msg}\n💰 Баланс: {user['balance']:,} 🪙",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎰 Играть ещё", callback_data="c")],
-            [InlineKeyboardButton("↩️ Меню", callback_data="mn")]
-        ])
-    )
+    await update.message.reply_text(f"{msg}\n💰 Баланс: {user['balance']:,} 🪙", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть ещё", callback_data="c")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]))
 
 def main():
     global TREASURY
@@ -774,11 +760,11 @@ def main():
     TREASURY += random.randint(50000, 200000)
     if TREASURY > TREASURY_LIMIT:
         TREASURY = TREASURY_LIMIT
+    save_db()
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT, messages))
-    save_db()
     print("Бот запущен!")
     app.run_polling(drop_pending_updates=True)
 
