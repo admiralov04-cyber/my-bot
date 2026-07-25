@@ -6,9 +6,7 @@ TOKEN = os.getenv("API_TOKEN")
 if not TOKEN:
     raise ValueError("API_TOKEN не найден!")
 
-# ID администраторов
 ADMIN_IDS = ["1439955343"]
-
 DATA_FILE = "user_data.json"
 DAILY_START = 10000
 DB = {}
@@ -99,7 +97,6 @@ async def start(update, context):
     u = update.effective_user
     uid = str(u.id)
     get_user(uid, u.first_name)
-    
     kb = [
         [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
         [InlineKeyboardButton("🎰 Казино", callback_data="casino")],
@@ -109,18 +106,17 @@ async def start(update, context):
         [InlineKeyboardButton("🎁 Бонус", callback_data="daily")],
         [InlineKeyboardButton("🏆 Топ", callback_data="top")],
     ]
-    
     if is_admin(uid):
         kb.append([InlineKeyboardButton("⚙️ Админ-панель", callback_data="admin")])
-    
-    await update.message.reply_text(
-        f"🎰 Lucky Casino\n\nПривет, {u.first_name}!\nВыберите действие:",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
+    await update.message.reply_text(f"🎰 Lucky Casino\n\nПривет, {u.first_name}!", reply_markup=InlineKeyboardMarkup(kb))
 
 async def buttons(update, context):
     q = update.callback_query
-    await q.answer()
+    try:
+        await q.answer()
+    except:
+        pass
+    
     uid = str(q.from_user.id)
     user = get_user(uid, q.from_user.first_name)
     admin = is_admin(uid)
@@ -129,33 +125,15 @@ async def buttons(update, context):
         collect_mining(user)
         user = get_user(uid)
         card = VIDEO_CARDS.get(user["video_card"])
-        txt = "👤 Профиль\n\n"
-        txt += f"💰 Баланс: {user['balance']:,} 🪙\n"
-        txt += f"📅 Регистрация: {user['reg_date']}\n"
-        txt += f"🎮 Игр: {user['games']}\n"
-        txt += f"🎁 Кейсов: {user['cases_opened']}\n\n"
-        txt += "⛏ Майнинг:\n"
-        if card:
-            txt += f"Видеокарта: {card['emoji']} {card['name']}\n"
-        else:
-            txt += "Видеокарта: ❌ Нет\n"
-        txt += f"Намайнено: {user['mined_total']:,} 🪙\n"
-        txt += f"Бизнес: {'✅' if user['business'] else '❌'}\n"
-        txt += f"VIP: {'✅' if user['vip'] else '❌'}\n\n"
-        txt += f"Заработано: {user['earned']:,} 🪙\n"
-        txt += f"Проиграно: {user['lost']:,} 🪙"
-        kb = [
-            [InlineKeyboardButton("⛏ Собрать майнинг", callback_data="collect")],
-            [InlineKeyboardButton("↩️ Назад", callback_data="menu")]
-        ]
+        txt = f"👤 Профиль\n\n💰 Баланс: {user['balance']:,} 🪙\n📅 Регистрация: {user['reg_date']}\n🎮 Игр: {user['games']}\n🎁 Кейсов: {user['cases_opened']}\n\n⛏ Майнинг:\n"
+        txt += f"Видеокарта: {card['emoji']} {card['name']}\n" if card else "Видеокарта: ❌ Нет\n"
+        txt += f"Намайнено: {user['mined_total']:,} 🪙\nБизнес: {'✅' if user['business'] else '❌'}\nVIP: {'✅' if user['vip'] else '❌'}\n\nЗаработано: {user['earned']:,} 🪙\nПроиграно: {user['lost']:,} 🪙"
+        kb = [[InlineKeyboardButton("⛏ Собрать майнинг", callback_data="collect")], [InlineKeyboardButton("↩️ Назад", callback_data="menu")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
     elif q.data == "collect":
         inc = collect_mining(user)
-        if inc > 0:
-            await q.answer(f"Собрано: {inc:,} 🪙")
-        else:
-            await q.answer("Нечего собирать")
+        await q.answer(f"Собрано: {inc:,} 🪙" if inc > 0 else "Нечего собирать")
         await buttons(update, context)
     
     elif q.data == "casino":
@@ -173,7 +151,7 @@ async def buttons(update, context):
         if card:
             txt = f"⛏ Майнинг ферма\n\nВидеокарта: {card['emoji']} {card['name']}\nДоход: {card['income']:,} 🪙/час\nНамайнено: {user['mined_total']:,} 🪙\nОжидает: {pending:,} 🪙"
         else:
-            txt = "⛏ Майнинг ферма\n\n❌ Нет видеокарты!\nКупите в магазине.\n\nДоступные карты:\n"
+            txt = "⛏ Майнинг ферма\n\n❌ Нет видеокарты!\n\nДоступные карты:\n"
             for lv, c in VIDEO_CARDS.items():
                 txt += f"{c['emoji']} {c['name']}: {c['income']:,} 🪙/час\n"
         kb = []
@@ -279,8 +257,7 @@ async def buttons(update, context):
         user["business"] = True
         save_db()
         await q.answer("Бизнес куплен!")
-        kb = [[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]
-        await q.edit_message_text("✅ Бизнес куплен!\n+5,000 к бонусу", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("✅ Бизнес куплен!\n+5,000 к бонусу", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]))
     
     elif q.data == "buyv":
         if user["vip"]:
@@ -292,21 +269,18 @@ async def buttons(update, context):
         user["vip"] = True
         save_db()
         await q.answer("VIP активирован!")
-        kb = [[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]
-        await q.edit_message_text("✅ VIP активирован!\nx2 выигрыши и бонусы", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("✅ VIP активирован!\nx2 выигрыши и бонусы", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]))
     
     elif q.data in ["game_coin", "game_dice", "game_slots"]:
         games = {"game_coin": "Монетка", "game_dice": "Кости", "game_slots": "Слоты"}
         user["current_game"] = q.data
         save_db()
-        kb = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-        await q.edit_message_text(f"🎮 {games[q.data]}\n💰 Баланс: {user['balance']:,} 🪙\n\nВведите ставку:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(f"🎮 {games[q.data]}\n💰 Баланс: {user['balance']:,} 🪙\n\nВведите ставку:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]))
     
     elif q.data == "cancel":
         user["current_game"] = None
         save_db()
-        kb = [[InlineKeyboardButton("🎰 Казино", callback_data="casino")], [InlineKeyboardButton("↩️ Меню", callback_data="menu")]]
-        await q.edit_message_text("❌ Отменено", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("❌ Отменено", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Казино", callback_data="casino")], [InlineKeyboardButton("↩️ Меню", callback_data="menu")]]))
     
     elif q.data == "daily":
         today = str(datetime.date.today())
@@ -320,11 +294,9 @@ async def buttons(update, context):
             user["last_daily"] = today
             user["earned"] += bonus
             save_db()
-            kb = [[InlineKeyboardButton("↩️ Меню", callback_data="menu")]]
-            await q.edit_message_text(f"✅ Бонус: +{bonus:,} 🪙\n💰 Баланс: {user['balance']:,} 🪙", reply_markup=InlineKeyboardMarkup(kb))
+            await q.edit_message_text(f"✅ Бонус: +{bonus:,} 🪙\n💰 Баланс: {user['balance']:,} 🪙", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Меню", callback_data="menu")]]))
         else:
-            kb = [[InlineKeyboardButton("↩️ Меню", callback_data="menu")]]
-            await q.edit_message_text("❌ Уже получен!\nЗавтра снова", reply_markup=InlineKeyboardMarkup(kb))
+            await q.edit_message_text("❌ Уже получен!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Меню", callback_data="menu")]]))
     
     elif q.data == "top":
         su = sorted(DB.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
@@ -333,8 +305,7 @@ async def buttons(update, context):
             u_data = item[1]
             vip = "👑" if u_data.get("vip") else ""
             txt += f"{i}. {vip}{u_data['name'][:15]}: {u_data['balance']:,} 🪙\n"
-        kb = [[InlineKeyboardButton("↩️ Назад", callback_data="menu")]]
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Назад", callback_data="menu")]]))
     
     elif q.data == "admin":
         if not admin:
@@ -342,14 +313,14 @@ async def buttons(update, context):
             return
         total_users = len(DB)
         total_balance = sum(u["balance"] for u in DB.values())
-        txt = f"⚙️ Админ-панель\n\n👥 Пользователей: {total_users}\n💰 Общий баланс: {total_balance:,} 🪙\n\nВыберите действие:"
+        txt = f"⚙️ Админ-панель\n\n👥 Пользователей: {total_users}\n💰 Общий баланс: {total_balance:,} 🪙"
         kb = [
-            [InlineKeyboardButton("👥 Список пользователей", callback_data="admin_users")],
-            [InlineKeyboardButton("💰 Выдать валюту", callback_data="admin_give")],
+            [InlineKeyboardButton("👥 Список", callback_data="admin_users")],
+            [InlineKeyboardButton("💰 Выдать", callback_data="admin_give")],
             [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
-            [InlineKeyboardButton("🔄 Сбросить бонусы", callback_data="admin_reset_daily")],
+            [InlineKeyboardButton("🔄 Сброс бонусов", callback_data="admin_reset_daily")],
             [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast")],
-            [InlineKeyboardButton("↩️ В меню", callback_data="menu")],
+            [InlineKeyboardButton("↩️ Меню", callback_data="menu")],
         ]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
@@ -359,36 +330,32 @@ async def buttons(update, context):
         txt = "👥 Пользователи:\n\n"
         for i, (uid, u) in enumerate(list(DB.items())[:20], 1):
             txt += f"{i}. {u['name'][:15]} (ID:{uid[:8]}): {u['balance']:,} 🪙\n"
-        kb = [[InlineKeyboardButton("↩️ В админ-панель", callback_data="admin")]]
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Назад", callback_data="admin")]]))
     
     elif q.data == "admin_stats":
         if not admin:
             return
-        total_users = len(DB)
-        total_balance = sum(u["balance"] for u in DB.values())
-        txt = f"📊 Статистика\n\n👥 Пользователей: {total_users}\n💰 Общий баланс: {total_balance:,} 🪙\n"
-        kb = [[InlineKeyboardButton("↩️ В админ-панель", callback_data="admin")]]
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+        total = len(DB)
+        bal = sum(u["balance"] for u in DB.values())
+        txt = f"📊 Статистика\n\n👥 Пользователей: {total}\n💰 Баланс: {bal:,} 🪙"
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Назад", callback_data="admin")]]))
     
     elif q.data == "admin_give":
         if not admin:
             return
-        txt = "💰 Выдача валюты\n\nВыберите пользователя:"
         kb = []
         for uid, u in list(DB.items())[:15]:
             kb.append([InlineKeyboardButton(f"{u['name'][:20]} - {u['balance']:,}🪙", callback_data=f"admgive_{uid}")])
-        kb.append([InlineKeyboardButton("↩️ В админ-панель", callback_data="admin")])
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+        kb.append([InlineKeyboardButton("↩️ Назад", callback_data="admin")])
+        await q.edit_message_text("💰 Выдача валюты\n\nВыберите:", reply_markup=InlineKeyboardMarkup(kb))
     
     elif q.data.startswith("admgive_"):
         if not admin:
             return
-        target_uid = q.data.replace("admgive_", "")
-        context.user_data["admin_target"] = target_uid
-        context.user_data["admin_action"] = "give_money"
-        kb = [[InlineKeyboardButton("↩️ Отмена", callback_data="admin")]]
-        await q.edit_message_text(f"💰 Выдача валюты\n\nПользователь: {DB[target_uid]['name']}\nБаланс: {DB[target_uid]['balance']:,} 🪙\n\n✏️ Введите сумму:", reply_markup=InlineKeyboardMarkup(kb))
+        target = q.data.replace("admgive_", "")
+        context.user_data["admin_target"] = target
+        context.user_data["admin_action"] = "give"
+        await q.edit_message_text(f"💰 Выдача\n\nПользователь: {DB[target]['name']}\nБаланс: {DB[target]['balance']:,} 🪙\n\nВведите сумму:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Отмена", callback_data="admin")]]))
     
     elif q.data == "admin_reset_daily":
         if not admin:
@@ -397,14 +364,12 @@ async def buttons(update, context):
             u["last_daily"] = None
         save_db()
         await q.answer("✅ Бонусы сброшены!")
-        await buttons(update, context)
     
     elif q.data == "admin_broadcast":
         if not admin:
             return
         context.user_data["admin_action"] = "broadcast"
-        kb = [[InlineKeyboardButton("↩️ Отмена", callback_data="admin")]]
-        await q.edit_message_text("📢 Рассылка\n\n✏️ Введите сообщение для всех:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("📢 Рассылка\n\nВведите сообщение:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Отмена", callback_data="admin")]]))
     
     elif q.data == "menu":
         kb = [
@@ -418,7 +383,7 @@ async def buttons(update, context):
         ]
         if admin:
             kb.append([InlineKeyboardButton("⚙️ Админ-панель", callback_data="admin")])
-        await q.edit_message_text("🎰 Главное меню\n\nВыберите действие:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("🎰 Главное меню", reply_markup=InlineKeyboardMarkup(kb))
 
 async def messages(update, context):
     uid = str(update.message.from_user.id)
@@ -427,17 +392,17 @@ async def messages(update, context):
     
     if admin and context.user_data.get("admin_action"):
         action = context.user_data["admin_action"]
-        if action == "give_money":
-            target_uid = context.user_data.get("admin_target")
-            if target_uid and target_uid in DB:
+        if action == "give":
+            target = context.user_data.get("admin_target")
+            if target and target in DB:
                 try:
                     amount = int(update.message.text.strip())
                     if amount > 0:
-                        DB[target_uid]["balance"] += amount
+                        DB[target]["balance"] += amount
                         save_db()
-                        await update.message.reply_text(f"✅ Выдано {amount:,} 🪙 пользователю {DB[target_uid]['name']}")
+                        await update.message.reply_text(f"✅ Выдано {amount:,} 🪙 пользователю {DB[target]['name']}")
                 except:
-                    await update.message.reply_text("❌ Введите целое число!")
+                    await update.message.reply_text("❌ Введите число!")
             context.user_data["admin_action"] = None
             context.user_data["admin_target"] = None
             return
@@ -448,4 +413,32 @@ async def messages(update, context):
                 try:
                     await context.bot.send_message(chat_id=int(uid), text=f"📢 Рассылка:\n\n{text}")
                     success += 1
-                excep
+                except:
+                    pass
+            await update.message.reply_text(f"✅ Отправлено: {success}")
+            context.user_data["admin_action"] = None
+            return
+    
+    if not user.get("current_game"):
+        return
+    
+    try:
+        bet = int(update.message.text.strip())
+    except:
+        await update.message.reply_text("❌ Введите число!")
+        return
+    
+    if bet < 1 or bet > user["balance"]:
+        await update.message.reply_text(f"❌ Неверная ставка!\n💰 Баланс: {user['balance']:,} 🪙")
+        return
+    
+    vip = 2 if user["vip"] else 1
+    game = user["current_game"]
+    win = 0
+    
+    if game == "game_coin":
+        coin = random.choice(["Орёл", "Решка"])
+        if random.random() < 0.5:
+            win = bet * 2 * vip
+            msg = f"🪙 {coin}\n✅ Победа! +{win-bet:,} 🪙"
+      
