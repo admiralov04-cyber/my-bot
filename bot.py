@@ -123,8 +123,6 @@ def cm(user):
 
 def try_robbery(user):
     global TREASURY
-    
-    # Проверка: раз в день
     today = str(datetime.date.today())
     if user.get("last_robbery") == today:
         return "❌ Вы уже грабили казну сегодня! Приходите завтра."
@@ -132,7 +130,6 @@ def try_robbery(user):
     if TREASURY <= 0:
         return "🏦 Казна пуста! Подождите пополнения."
     
-    # Шанс успеха
     cards = user.get("cards", 1)
     vip = user.get("vip", False)
     base_chance = 30
@@ -156,14 +153,7 @@ def try_robbery(user):
         user["exp"] = user.get("exp", 0) + random.randint(50, 200)
         save_db()
         
-        return (
-            f"🦹 *Ограбление казны!*\n\n"
-            f"🎯 Шанс: {success_chance}%\n"
-            f"✅ *Успех!*\n"
-            f"💰 Украдено: `{stolen:,}` 🪙\n"
-            f"💳 Баланс: `{user['balance']:,}` 🪙\n"
-            f"🏦 В казне осталось: `{TREASURY:,}` 🪙"
-        )
+        return f"🦹 Ограбление казны!\n\n🎯 Шанс: {success_chance}%\n✅ Успех!\n💰 Украдено: {stolen:,} 🪙\n💳 Баланс: {user['balance']:,} 🪙\n🏦 В казне: {TREASURY:,} 🪙"
     else:
         penalty = max(int(user["balance"] * 0.1), 100)
         user["balance"] -= penalty
@@ -171,14 +161,7 @@ def try_robbery(user):
         user["robbery_fail"] = user.get("robbery_fail", 0) + 1
         save_db()
         
-        return (
-            f"🦹 *Ограбление казны!*\n\n"
-            f"🎯 Шанс: {success_chance}%\n"
-            f"❌ *Провал!*\n"
-            f"👮 Штраф: `{penalty:,}` 🪙\n"
-            f"💳 Баланс: `{user['balance']:,}` 🪙\n"
-            f"🏦 В казне: `{TREASURY:,}` 🪙"
-        )
+        return f"🦹 Ограбление казны!\n\n🎯 Шанс: {success_chance}%\n❌ Провал!\n👮 Штраф: {penalty:,} 🪙\n💳 Баланс: {user['balance']:,} 🪙\n🏦 В казне: {TREASURY:,} 🪙"
 
 async def start(update, context):
     u = update.effective_user
@@ -426,10 +409,9 @@ async def messages(update, context):
     global TREASURY
     text = update.message.text.strip().lower()
     
-    # Проверка на ограбление казны
     if text in ["ограбить казну", "ограбление казны", "ограбить"]:
         result = try_robbery(user)
-        await update.message.reply_text(result, parse_mode='Markdown')
+        await update.message.reply_text(result)
         return
     
     if admin and context.user_data.get("action"):
@@ -451,4 +433,13 @@ async def messages(update, context):
             ok = 0
             for u in DB:
                 try:
-                    await context.bot.send_m
+                    await context.bot.send_message(chat_id=int(u), text=f"📢 {update.message.text}")
+                    ok += 1
+                except:
+                    pass
+            await update.message.reply_text(f"✅ Отправлено: {ok}")
+            context.user_data["action"] = None
+            return
+        elif act == "treasury":
+            try:
+                amount = int(
