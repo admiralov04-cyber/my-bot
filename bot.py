@@ -28,17 +28,23 @@ def load_data():
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        return {"users": {}, "shop": [
-            {"id": 1, "name": "Счастливая монета", "price": 50000, "desc": "Увеличивает шанс выигрыша"},
-            {"id": 2, "name": "Удвоитель опыта", "price": 75000, "desc": "Временное удвоение выигрышей"},
-            {"id": 3, "name": "VIP-статус", "price": 200000, "desc": "Эксклюзивные игры"},
-        ]}
+        return {
+            "users": {},
+            "shop": [
+                {"id": 1, "name": "🏪 Бизнес", "price": 100000, "desc": "Приносит 5000🪙 каждый час"},
+                {"id": 2, "name": "🌾 Ферма", "price": 50000, "desc": "Приносит 2000🪙 каждый час"},
+                {"id": 3, "name": "💎 VIP-статус", "price": 200000, "desc": "Удвоение всех выигрышей"},
+            ]
+        }
     except:
-        return {"users": {}, "shop": [
-            {"id": 1, "name": "Счастливая монета", "price": 50000, "desc": "Увеличивает шанс выигрыша"},
-            {"id": 2, "name": "Удвоитель опыта", "price": 75000, "desc": "Временное удвоение выигрышей"},
-            {"id": 3, "name": "VIP-статус", "price": 200000, "desc": "Эксклюзивные игры"},
-        ]}
+        return {
+            "users": {},
+            "shop": [
+                {"id": 1, "name": "🏪 Бизнес", "price": 100000, "desc": "Приносит 5000🪙 каждый час"},
+                {"id": 2, "name": "🌾 Ферма", "price": 50000, "desc": "Приносит 2000🪙 каждый час"},
+                {"id": 3, "name": "💎 VIP-статус", "price": 200000, "desc": "Удвоение всех выигрышей"},
+            ]
+        }
 
 # Сохранение данных
 def save_data(data):
@@ -50,25 +56,46 @@ def save_data(data):
         print(f"❌ Ошибка сохранения: {e}")
 
 # Получить пользователя
-def get_user(data, user_id):
+def get_user(data, user_id, username=None):
     user_id = str(user_id)
     if user_id not in data["users"]:
         data["users"][user_id] = {
+            "username": username or f"User{user_id[:6]}",
             "balance": 10000,
             "last_daily": None,
-            "current_game": None
+            "current_game": None,
+            "business": False,
+            "farm": False,
+            "vip": False,
+            "register_date": datetime.date.today().isoformat()
         }
         save_data(data)
+    elif username and data["users"][user_id].get("username") != username:
+        data["users"][user_id]["username"] = username
+        save_data(data)
     return data["users"][user_id]
+
+# Получить позицию в топе
+def get_top_position(data, user_id):
+    user_id = str(user_id)
+    sorted_users = sorted(
+        data["users"].items(),
+        key=lambda x: x[1]["balance"],
+        reverse=True
+    )
+    for i, (uid, _) in enumerate(sorted_users, 1):
+        if uid == user_id:
+            return i
+    return len(sorted_users) + 1 if sorted_users else 1
 
 # Главное меню
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("💰 Баланс", callback_data="balance")],
+        [InlineKeyboardButton("👤 Мой профиль", callback_data="profile")],
         [InlineKeyboardButton("🎲 Казино", callback_data="casino")],
         [InlineKeyboardButton("🛍 Магазин", callback_data="shop")],
-        [InlineKeyboardButton("🗓 Бонус", callback_data="daily")],
-        [InlineKeyboardButton("🏆 Топ", callback_data="top")],
+        [InlineKeyboardButton("🗓 Ежедневный бонус", callback_data="daily")],
+        [InlineKeyboardButton("🏆 Топ игроков", callback_data="top")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -83,17 +110,41 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     user_id = str(query.from_user.id)
+    username = query.from_user.username or query.from_user.first_name
     data = load_data()
-    user = get_user(data, user_id)
+    user = get_user(data, user_id, username)
     
-    if query.data == "balance":
+    # Профиль
+    if query.data == "profile":
+        top_pos = get_top_position(data, user_id)
+        total_users = len(data["users"])
+        reg_date = user.get("register_date", "Неизвестно")
+        
+        # Определяем статусы
+        business_status = "✅ Есть" if user.get("business") else "❌ Нет"
+        farm_status = "✅ Есть" if user.get("farm") else "❌ Нет"
+        vip_status = "👑 VIP" if user.get("vip") else "⭐ Обычный"
+        
+        profile_text = (
+            f"👤 *Профиль игрока*\n\n"
+            f"📛 *Имя:* `{user['username']}`\n"
+            f"🆔 *ID:* `{user_id}`\n\n"
+            f"💰 *Баланс:* `{user['balance']:,}` 🪙\n"
+            f"📅 *Дата регистрации:* `{reg_date}`\n"
+            f"🏆 *Место в топе:* `{top_pos}` из `{total_users}`\n\n"
+            f"🏪 *Бизнес:* {business_status}\n"
+            f"🌾 *Ферма:* {farm_status}\n"
+            f"💎 *Статус:* {vip_status}"
+        )
+        
         keyboard = [[InlineKeyboardButton("↩️ Назад", callback_data="back")]]
         await query.edit_message_text(
-            f"💰 *Ваш баланс*\n\n`{user['balance']:,}` 🪙",
+            profile_text,
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     
+    # Казино
     elif query.data == "casino":
         keyboard = [
             [InlineKeyboardButton("🪙 Орел/Решка", callback_data="coin")],
@@ -106,6 +157,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     
+    # Выбор игры
     elif query.data in ["coin", "dice"]:
         game_name = "Орел/Решка" if query.data == "coin" else "Кости"
         user["current_game"] = query.data
@@ -118,6 +170,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     
+    # Отмена ставки
     elif query.data == "cancel":
         user["current_game"] = None
         save_data(data)
@@ -131,17 +184,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     
+    # Ежедневный бонус
     elif query.data == "daily":
         today = datetime.date.today().isoformat()
         
         if user["last_daily"] != today:
-            user["balance"] += DAILY_START
+            bonus = DAILY_START
+            # VIP получает двойной бонус
+            if user.get("vip"):
+                bonus *= 2
+            
+            user["balance"] += bonus
             user["last_daily"] = today
             save_data(data)
             
+            vip_text = " (VIP x2)" if user.get("vip") else ""
             keyboard = [[InlineKeyboardButton("↩️ Меню", callback_data="back")]]
             await query.edit_message_text(
-                f"✅ *Бонус получен!*\n\n🎁 Бонус: `+{DAILY_START:,}` 🪙\n💰 Баланс: `{user['balance']:,}` 🪙",
+                f"✅ *Бонус получен!{vip_text}*\n\n🎁 Бонус: `+{bonus:,}` 🪙\n💰 Баланс: `{user['balance']:,}` 🪙",
                 parse_mode='Markdown',
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
@@ -153,18 +213,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
     
+    # Магазин
     elif query.data == "shop":
         buttons = []
         for item in data["shop"]:
-            buttons.append([InlineKeyboardButton(
-                f"{item['name']} - {item['price']:,} 🪙",
-                callback_data=f"buy_{item['id']}"
-            )])
+            # Проверяем, есть ли уже этот предмет у пользователя
+            if item["id"] == 1 and user.get("business"):
+                buttons.append([InlineKeyboardButton(
+                    f"🏪 Бизнес - КУПЛЕНО ✅",
+                    callback_data="owned"
+                )])
+            elif item["id"] == 2 and user.get("farm"):
+                buttons.append([InlineKeyboardButton(
+                    f"🌾 Ферма - КУПЛЕНО ✅",
+                    callback_data="owned"
+                )])
+            elif item["id"] == 3 and user.get("vip"):
+                buttons.append([InlineKeyboardButton(
+                    f"💎 VIP - АКТИВЕН ✅",
+                    callback_data="owned"
+                )])
+            else:
+                buttons.append([InlineKeyboardButton(
+                    f"{item['name']} - {item['price']:,} 🪙",
+                    callback_data=f"buy_{item['id']}"
+                )])
         buttons.append([InlineKeyboardButton("↩️ Назад", callback_data="back")])
         
         text = "🛍 *Магазин*\n\n*Товары:*\n"
         for item in data["shop"]:
-            text += f"\n📦 *{item['name']}*\n💵 Цена: `{item['price']:,}` 🪙\n📝 {item['desc']}\n"
+            owned = False
+            if item["id"] == 1 and user.get("business"):
+                owned = True
+            elif item["id"] == 2 and user.get("farm"):
+                owned = True
+            elif item["id"] == 3 and user.get("vip"):
+                owned = True
+            
+            status = "✅ Куплено" if owned else f"💵 Цена: `{item['price']:,}` 🪙"
+            text += f"\n📦 *{item['name']}*\n{status}\n📝 {item['desc']}\n"
         
         await query.edit_message_text(
             text,
@@ -172,6 +259,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(buttons)
         )
     
+    # Покупка
     elif query.data.startswith("buy_"):
         item_id = int(query.data.split("_")[1])
         
@@ -185,6 +273,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Товар не найден")
             return
         
+        # Проверяем, не куплен ли уже
+        if item_id == 1 and user.get("business"):
+            await query.answer("У вас уже есть бизнес!")
+            return
+        elif item_id == 2 and user.get("farm"):
+            await query.answer("У вас уже есть ферма!")
+            return
+        elif item_id == 3 and user.get("vip"):
+            await query.answer("У вас уже есть VIP-статус!")
+            return
+        
         if user["balance"] < item["price"]:
             keyboard = [[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]
             await query.edit_message_text(
@@ -195,6 +294,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         user["balance"] -= item["price"]
+        
+        # Устанавливаем флаг покупки
+        if item_id == 1:
+            user["business"] = True
+        elif item_id == 2:
+            user["farm"] = True
+        elif item_id == 3:
+            user["vip"] = True
+        
         save_data(data)
         
         keyboard = [[InlineKeyboardButton("↩️ Меню", callback_data="back")]]
@@ -204,8 +312,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     
+    # Уже куплено
+    elif query.data == "owned":
+        await query.answer("Этот предмет уже куплен!")
+    
+    # Топ
     elif query.data == "top":
-        # Сортируем пользователей по балансу
         sorted_users = sorted(
             data["users"].items(),
             key=lambda x: x[1]["balance"],
@@ -214,9 +326,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         msg = "🏆 *Топ-10 игроков:*\n\n"
         for i, (uid, u_data) in enumerate(sorted_users, 1):
-            # Пробуем получить username из контекста
-            username = f"ID:{uid[:8]}"
-            msg += f"{'🥇' if i==1 else '🥈' if i==2 else '🥉' if i==3 else '👤'} {i}. {username}: `{u_data['balance']:,}` 🪙\n"
+            name = u_data.get("username", f"ID:{uid[:8]}")
+            vip_icon = "👑 " if u_data.get("vip") else ""
+            msg += f"{'🥇' if i==1 else '🥈' if i==2 else '🥉' if i==3 else '👤'} {i}. {vip_icon}{name}: `{u_data['balance']:,}` 🪙\n"
         
         keyboard = [[InlineKeyboardButton("↩️ Назад", callback_data="back")]]
         await query.edit_message_text(
@@ -225,13 +337,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     
+    # Назад в меню
     elif query.data == "back":
         keyboard = [
-            [InlineKeyboardButton("💰 Баланс", callback_data="balance")],
+            [InlineKeyboardButton("👤 Мой профиль", callback_data="profile")],
             [InlineKeyboardButton("🎲 Казино", callback_data="casino")],
             [InlineKeyboardButton("🛍 Магазин", callback_data="shop")],
-            [InlineKeyboardButton("🗓 Бонус", callback_data="daily")],
-            [InlineKeyboardButton("🏆 Топ", callback_data="top")],
+            [InlineKeyboardButton("🗓 Ежедневный бонус", callback_data="daily")],
+            [InlineKeyboardButton("🏆 Топ игроков", callback_data="top")],
         ]
         await query.edit_message_text(
             "🎰 *Главное меню*\n\nВыбери действие:",
@@ -242,8 +355,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Обработка сообщений (ставки)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
+    username = update.message.from_user.username or update.message.from_user.first_name
     data = load_data()
-    user = get_user(data, user_id)
+    user = get_user(data, user_id, username)
     
     if not user["current_game"]:
         return
@@ -265,12 +379,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # Множитель для VIP
+    vip_multiplier = 2 if user.get("vip") else 1
+    
     # Игры
     if user["current_game"] == "coin":
         coin = random.choice(["орёл", "решка"])
         won = random.choice([True, False])
         if won:
-            win = bet * 2
+            win = bet * 2 * vip_multiplier
             msg = f"🪙 Монетка: *{coin}*\n✅ Победа! +{win-bet:,} 🪙"
         else:
             win = 0
@@ -280,7 +397,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         d1, d2 = random.randint(1, 6), random.randint(1, 6)
         total = d1 + d2
         if total % 2 == 0:
-            win = bet * 2
+            win = bet * 2 * vip_multiplier
             msg = f"🎲 {d1}+{d2}=*{total}* (Чёт)\n✅ Победа! +{win-bet:,} 🪙"
         else:
             win = 0
@@ -295,8 +412,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("↩️ Меню", callback_data="back")]
     ]
     
+    vip_text = " (VIP x2)" if user.get("vip") and win > 0 else ""
     await update.message.reply_text(
-        f"{msg}\n💰 Баланс: `{user['balance']:,}` 🪙",
+        f"{msg}{vip_text}\n💰 Баланс: `{user['balance']:,}` 🪙",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -312,23 +430,52 @@ async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     msg = "🏆 *Топ-10 игроков:*\n\n"
     for i, (uid, u_data) in enumerate(sorted_users, 1):
-        username = f"ID:{uid[:8]}"
-        msg += f"{'🥇' if i==1 else '🥈' if i==2 else '🥉' if i==3 else '👤'} {i}. {username}: `{u_data['balance']:,}` 🪙\n"
+        name = u_data.get("username", f"ID:{uid[:8]}")
+        vip_icon = "👑 " if u_data.get("vip") else ""
+        msg += f"{'🥇' if i==1 else '🥈' if i==2 else '🥉' if i==3 else '👤'} {i}. {vip_icon}{name}: `{u_data['balance']:,}` 🪙\n"
     
     await update.message.reply_text(msg, parse_mode='Markdown')
+
+# Команда /profile
+async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    username = update.effective_user.username or update.effective_user.first_name
+    data = load_data()
+    user = get_user(data, user_id, username)
+    
+    top_pos = get_top_position(data, user_id)
+    total_users = len(data["users"])
+    reg_date = user.get("register_date", "Неизвестно")
+    
+    business_status = "✅ Есть" if user.get("business") else "❌ Нет"
+    farm_status = "✅ Есть" if user.get("farm") else "❌ Нет"
+    vip_status = "👑 VIP" if user.get("vip") else "⭐ Обычный"
+    
+    profile_text = (
+        f"👤 *Профиль игрока*\n\n"
+        f"📛 *Имя:* `{user['username']}`\n"
+        f"🆔 *ID:* `{user_id}`\n\n"
+        f"💰 *Баланс:* `{user['balance']:,}` 🪙\n"
+        f"📅 *Дата регистрации:* `{reg_date}`\n"
+        f"🏆 *Место в топе:* `{top_pos}` из `{total_users}`\n\n"
+        f"🏪 *Бизнес:* {business_status}\n"
+        f"🌾 *Ферма:* {farm_status}\n"
+        f"💎 *Статус:* {vip_status}"
+    )
+    
+    await update.message.reply_text(profile_text, parse_mode='Markdown')
 
 # Запуск
 def main():
     print("🚀 Запуск бота...")
     
-    # Создаем файл данных если его нет
     if not os.path.exists(DATA_FILE):
         initial_data = {
             "users": {},
             "shop": [
-                {"id": 1, "name": "Счастливая монета", "price": 50000, "desc": "Увеличивает шанс выигрыша"},
-                {"id": 2, "name": "Удвоитель опыта", "price": 75000, "desc": "Временное удвоение выигрышей"},
-                {"id": 3, "name": "VIP-статус", "price": 200000, "desc": "Эксклюзивные игры"},
+                {"id": 1, "name": "🏪 Бизнес", "price": 100000, "desc": "Приносит 5000🪙 каждый час"},
+                {"id": 2, "name": "🌾 Ферма", "price": 50000, "desc": "Приносит 2000🪙 каждый час"},
+                {"id": 3, "name": "💎 VIP-статус", "price": 200000, "desc": "Удвоение всех выигрышей"},
             ]
         }
         save_data(initial_data)
@@ -337,6 +484,7 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top", top_command))
+    app.add_handler(CommandHandler("profile", profile_command))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
