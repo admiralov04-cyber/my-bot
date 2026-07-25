@@ -199,18 +199,16 @@ def add_treasury():
 def transfer_money(sender, target_id, amount):
     target_id = str(target_id)
     if target_id not in DB:
-        return False, "❌ Игрок не найден!"
-    if target_id == str(sender["user_id"]) if isinstance(sender, dict) else False:
-        return False, "❌ Нельзя перевести себе!"
+        return "❌ Игрок не найден!"
     if amount <= 0:
-        return False, "❌ Неверная сумма!"
+        return "❌ Неверная сумма!"
     if amount > sender["balance"]:
-        return False, "❌ Недостаточно средств!"
+        return "❌ Недостаточно средств!"
     sender["balance"] -= amount
     DB[target_id]["balance"] += amount
     save_db()
     target_name = DB[target_id]["name"]
-    return True, f"✅ Перевод выполнен!\n💸 {amount:,} 🪙 → {target_name}\n💰 Ваш баланс: {sender['balance']:,}"
+    return f"✅ Перевод выполнен!\n💸 {amount:,} 🪙 → {target_name}\n💰 Ваш баланс: {sender['balance']:,}"
 
 def show_bank(user):
     bank_balance = user.get("bank_balance", 0)
@@ -221,10 +219,10 @@ def show_bank(user):
     if bank_int > 0:
         txt += f"📈 Проценты: +{bank_int:,} 🪙\n"
     txt += f"💹 Ставка: {BANK_PERCENT}% в день\n\n"
-    txt += "📥 Положить: банк [сумма]\n"
-    txt += "📤 Снять: снять [сумма]\n"
-    txt += "📤 Снять все: снять все\n"
-    txt += "💸 Перевод: перевести [ID] [сумма]"
+    txt += "📥 банк [сумма] - положить\n"
+    txt += "📤 снять [сумма] - снять\n"
+    txt += "📤 снять все\n"
+    txt += "💸 перевести [ID] [сумма]"
     return txt
 
 def get_main_keyboard(uid):
@@ -243,22 +241,21 @@ def get_main_keyboard(uid):
     return kb
 
 async def start(update, context):
-    chat_type = update.effective_chat.type
     u = update.effective_user
     uid = str(u.id)
-    user = get_user(uid, u.first_name or u.username)
+    get_user(uid, u.first_name or u.username)
     kb = get_main_keyboard(uid)
-    
-    if chat_type in ["group", "supergroup"]:
-        await update.message.reply_text(
-            f"🎰 Lucky Casino\n\n{u.first_name or u.username}, напишите команду или используйте кнопки ниже!",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
-    else:
-        await update.message.reply_text(
-            f"🎰 Lucky Casino\n\nПривет, {u.first_name or u.username}!",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+    await update.message.reply_text(
+        f"🎰 Lucky Casino\n\nПривет, {u.first_name or u.username}!\n\n"
+        f"Команды в чате:\n"
+        f"банк - банк\n"
+        f"банк 1000 - положить\n"
+        f"снять 500 - снять\n"
+        f"снять все\n"
+        f"перевести ID сумма\n"
+        f"ограбить казну",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
 
 async def buttons(update, context):
     global TREASURY
@@ -425,7 +422,7 @@ async def buttons(update, context):
 async def messages(update, context):
     global TREASURY
     
-    if not update.message:
+    if not update.message or not update.message.text:
         return
     
     uid = str(update.message.from_user.id)
@@ -434,25 +431,27 @@ async def messages(update, context):
     admin = is_admin(uid)
     text = update.message.text.strip().lower()
 
-    # Банк
+    # Банк - показать
     if text in ["банк", "б"]:
         await update.message.reply_text(show_bank(user))
         return
 
+    # Банк - положить (банк 1000)
     if text.startswith("банк ") or text.startswith("б "):
         parts = text.split()
-        if len(parts) == 2:
+        if len(parts) >= 2:
             try:
                 amount = int(parts[1])
                 msg = deposit_bank(user, amount)
                 await update.message.reply_text(msg)
             except:
-                await update.message.reply_text("❌ Неверная сумма!")
+                await update.message.reply_text("❌ Неверная сумма! Пример: банк 1000")
         return
 
+    # Снять
     if text.startswith("снять "):
         parts = text.split()
-        if len(parts) == 2:
+        if len(parts) >= 2:
             if parts[1] == "все":
                 interest = calculate_bank_interest(user)
                 total = user.get("bank_balance", 0) + interest
@@ -470,31 +469,31 @@ async def messages(update, context):
                     msg = withdraw_bank(user, amount)
                     await update.message.reply_text(msg)
                 except:
-                    await update.message.reply_text("❌ Неверная сумма!")
+                    await update.message.reply_text("❌ Неверная сумма! Пример: снять 500")
         return
 
-    # Перевод
+    # Перевести
     if text.startswith("перевести ") or text.startswith("перевод "):
         parts = text.split()
-        if len(parts) == 3:
+        if len(parts) >= 3:
             try:
                 target_id = parts[1]
                 amount = int(parts[2])
-                ok, msg = transfer_money(user, target_id, amount)
+                msg = transfer_money(user, target_id, amount)
                 await update.message.reply_text(msg)
             except:
-                await update.message.reply_text("❌ Формат: перевести [ID] [сумма]")
+                await update.message.reply_text("❌ Формат: перевести ID сумма\nПример: перевести 1439955343 5000")
         else:
-            await update.message.reply_text("❌ Формат: перевести [ID] [сумма]")
+            await update.message.reply_text("❌ Формат: перевести ID сумма\nПример: перевести 1439955343 5000")
         return
 
-    # Ограбление
-    if text in ["ограбить казну", "ограбление казны", "ограбить"]:
+    # Ограбить казну
+    if text in ["ограбить казну", "ограбление казны", "ограбить", "ограбление"]:
         result = try_robbery(user)
         await update.message.reply_text(result)
         return
 
-    # Админ
+    # Админские действия
     if admin and context.user_data.get("action"):
         act = context.user_data["action"]
         if act == "give":
@@ -533,18 +532,18 @@ async def messages(update, context):
             context.user_data["action"] = None
             return
 
-    # Игры
+    # Игры (только если активна игра)
     if not user.get("current_game"):
         return
 
     try:
         bet = int(text)
     except:
-        await update.message.reply_text("❌ Число!")
+        await update.message.reply_text("❌ Введите число!")
         return
 
     if bet < 1 or bet > user["balance"]:
-        await update.message.reply_text("❌")
+        await update.message.reply_text(f"❌ Неверная ставка!\n💰 Баланс: {user['balance']:,} 🪙")
         return
 
     vip = 2 if user["vip"] else 1
@@ -554,19 +553,19 @@ async def messages(update, context):
     if game == "gc":
         coin = random.choice(["Орёл", "Решка"])
         win = bet * 2 * vip if random.random() < 0.5 else 0
-        msg = f"🪙 {coin}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,}"
+        msg = f"🪙 {coin}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,} 🪙"
     elif game == "gd":
         d1, d2 = random.randint(1,6), random.randint(1,6)
         t = d1 + d2
         win = bet * 2 * vip if t % 2 == 0 else 0
-        msg = f"🎲 {d1}+{d2}={t}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,}"
+        msg = f"🎲 {d1}+{d2}={t}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,} 🪙"
     else:
         s = random.choices(["🍒","🍋","🍊","7️⃣","💎","⭐"], k=3)
         if s[0] == s[1] == s[2]:
             win = bet * 5 * vip
         elif s[0] == s[1] or s[1] == s[2] or s[0] == s[2]:
             win = bet * 2 * vip
-        msg = f"🎰 {' '.join(s)}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,}"
+        msg = f"🎰 {' '.join(s)}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,} 🪙"
 
     user["balance"] += win - bet
     user["games"] += 1
@@ -578,7 +577,13 @@ async def messages(update, context):
     user["current_game"] = None
     save_db()
 
-    await update.message.reply_text(f"{msg}\n💰 {user['balance']:,}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть", callback_data="c")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]))
+    await update.message.reply_text(
+        f"{msg}\n💰 Баланс: {user['balance']:,} 🪙",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎰 Играть", callback_data="c")],
+            [InlineKeyboardButton("↩️ Меню", callback_data="mn")]
+        ])
+    )
 
 def main():
     load_db()
