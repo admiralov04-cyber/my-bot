@@ -1,14 +1,10 @@
-import json
-import os
-import datetime
-import random
-
+import json, os, datetime, random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 TOKEN = os.getenv("API_TOKEN")
 if not TOKEN:
-    raise ValueError("API_TOKEN не найден!")
+    raise ValueError("API_TOKEN not found!")
 
 DATA_FILE = "user_data.json"
 DAILY_START = 10000
@@ -23,43 +19,33 @@ VIDEO_CARDS = {
 }
 
 CASES = {
-    "common": {"name": "Обычный кейс", "price": 5000, "rewards": [1000, 2000, 3000, 5000, 10000]},
-    "rare": {"name": "Редкий кейс", "price": 15000, "rewards": [5000, 10000, 20000, 35000, 50000]},
-    "epic": {"name": "Эпический кейс", "price": 50000, "rewards": [15000, 30000, 50000, 100000, 200000]},
-    "legendary": {"name": "Легендарный кейс", "price": 150000, "rewards": [50000, 100000, 200000, 500000, 1000000]},
+    "common": {"name": "Common", "price": 5000, "rewards": [1000, 2000, 3000, 5000, 10000]},
+    "rare": {"name": "Rare", "price": 15000, "rewards": [5000, 10000, 20000, 35000, 50000]},
+    "epic": {"name": "Epic", "price": 50000, "rewards": [15000, 30000, 50000, 100000, 200000]},
+    "legendary": {"name": "Legendary", "price": 150000, "rewards": [50000, 100000, 200000, 500000, 1000000]},
 }
 
-def load_database():
+def load_db():
     global DB
     try:
         if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                content = f.read()
-                if content.strip():
-                    DB = json.loads(content)
-                    print(f"Loaded: {len(DB)} users")
-                    return True
-    except Exception as e:
-        print(f"Load error: {e}")
-    DB = {}
-    return False
+            with open(DATA_FILE, 'r') as f:
+                DB = json.loads(f.read() or "{}")
+    except:
+        DB = {}
 
-def save_database():
-    global DB
+def save_db():
     try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(DB, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception as e:
-        print(f"Save error: {e}")
-        return False
+        with open(DATA_FILE, 'w') as f:
+            json.dump(DB, f)
+    except:
+        pass
 
-def get_user(user_id, username=None):
-    global DB
-    uid = str(user_id)
+def get_user(uid, name=None):
+    uid = str(uid)
     if uid not in DB:
         DB[uid] = {
-            "name": username or f"Player{uid[:6]}",
+            "name": name or "Player",
             "balance": 10000,
             "last_daily": None,
             "current_game": None,
@@ -68,330 +54,232 @@ def get_user(user_id, username=None):
             "video_card": 0,
             "mining_start": None,
             "mined_total": 0,
-            "reg_date": datetime.date.today().isoformat(),
+            "reg_date": str(datetime.date.today()),
             "earned": 0,
             "lost": 0,
             "games": 0,
             "cases_opened": 0,
         }
-        save_database()
-    if username and DB[uid]["name"] != username:
-        DB[uid]["name"] = username
-        save_database()
+        save_db()
     return DB[uid]
 
-def calculate_mining_income(user):
+def mining_income(user):
     if user["video_card"] == 0 or not user.get("mining_start"):
         return 0
     card = VIDEO_CARDS.get(user["video_card"])
     if not card:
         return 0
     try:
-        start_time = datetime.datetime.fromisoformat(user["mining_start"])
-        now = datetime.datetime.now()
-        hours_passed = (now - start_time).total_seconds() / 3600
-        if hours_passed < 0:
-            return 0
-        return int(hours_passed * card["income"])
+        start = datetime.datetime.fromisoformat(user["mining_start"])
+        hours = (datetime.datetime.now() - start).total_seconds() / 3600
+        return max(0, int(hours * card["income"]))
     except:
         return 0
 
 def collect_mining(user):
-    income = calculate_mining_income(user)
-    if income > 0:
-        user["balance"] += income
-        user["mined_total"] = user.get("mined_total", 0) + income
+    inc = mining_income(user)
+    if inc > 0:
+        user["balance"] += inc
+        user["mined_total"] = user.get("mined_total", 0) + inc
         user["mining_start"] = datetime.datetime.now().isoformat()
-        save_database()
-        return income
-    return 0
+        save_db()
+    return inc
 
-def get_top_position(user_id):
-    uid = str(user_id)
-    if not DB:
-        return 1, 1
-    sorted_users = sorted(DB.items(), key=lambda x: x[1]["balance"], reverse=True)
-    for i, (u_id, _) in enumerate(sorted_users, 1):
-        if u_id == uid:
-            return i, len(sorted_users)
-    return len(sorted_users) + 1, len(sorted_users) + 1
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    uid = str(user.id)
-    get_user(uid, user.username or user.first_name)
-    keyboard = [
-        [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
-        [InlineKeyboardButton("🎰 Казино", callback_data="casino")],
-        [InlineKeyboardButton("⛏ Майнинг", callback_data="mining")],
-        [InlineKeyboardButton("🎁 Кейсы", callback_data="cases")],
-        [InlineKeyboardButton("🛍 Магазин", callback_data="shop")],
-        [InlineKeyboardButton("🎁 Бонус", callback_data="daily")],
-        [InlineKeyboardButton("🏆 Топ", callback_data="top")],
+async def start(update, context):
+    u = update.effective_user
+    get_user(u.id, u.first_name)
+    kb = [
+        [InlineKeyboardButton("👤 Profile", callback_data="profile")],
+        [InlineKeyboardButton("🎰 Casino", callback_data="casino")],
+        [InlineKeyboardButton("⛏ Mining", callback_data="mining")],
+        [InlineKeyboardButton("🎁 Cases", callback_data="cases")],
+        [InlineKeyboardButton("🛍 Shop", callback_data="shop")],
+        [InlineKeyboardButton("🎁 Bonus", callback_data="daily")],
+        [InlineKeyboardButton("🏆 Top", callback_data="top")],
     ]
-    await update.message.reply_text(
-        f"🎰 *Lucky Casino*\n\nHi, *{user.first_name}*!",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text(f"🎰 Casino Bot\nHi {u.first_name}!", reply_markup=InlineKeyboardMarkup(kb))
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    uid = str(query.from_user.id)
-    name = query.from_user.username or query.from_user.first_name
-    user = get_user(uid, name)
+async def buttons(update, context):
+    q = update.callback_query
+    await q.answer()
+    uid = str(q.from_user.id)
+    user = get_user(uid, q.from_user.first_name)
     
-    if query.data == "profile":
-        mining_income = collect_mining(user)
-        user = get_user(uid, name)
-        pos, total = get_top_position(uid)
-        card_level = user.get("video_card", 0)
-        card_info = VIDEO_CARDS.get(card_level)
-        
-        text = f"👤 *Profile*\n\n💰 Balance: `{user['balance']:,}`\n📅 Since: `{user['reg_date']}`\n🏆 Rank: `{pos}/{total}`\n🎮 Games: `{user['games']}`\n🎁 Cases: `{user.get('cases_opened', 0)}`\n\n⛏ *Mining:*\n"
-        
-        if card_info:
-            text += f"🖥 Card: {card_info['emoji']} *{card_info['name']}*\n"
-        else:
-            text += "🖥 Card: ❌ None\n"
-        
-        text += f"💎 Mined: `{user.get('mined_total', 0):,}`\n🏪 Business: {'✅' if user['business'] else '❌'}\n💎 Status: {'👑 VIP' if user['vip'] else '⭐ Normal'}\n\n💚 Earned: `{user['earned']:,}`\n💔 Lost: `{user['lost']:,}`"
-        
-        if mining_income > 0:
-            text += f"\n\n✅ Collected: `+{mining_income:,}`"
-        
-        keyboard = [
-            [InlineKeyboardButton("⛏ Collect Mining", callback_data="collect_mining")],
-            [InlineKeyboardButton("↩️ Back", callback_data="menu")]
-        ]
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    if q.data == "profile":
+        collect_mining(user)
+        user = get_user(uid)
+        card = VIDEO_CARDS.get(user["video_card"])
+        txt = f"👤 Profile\n\n💰 Balance: {user['balance']:,}\n📅 Since: {user['reg_date']}\n🎮 Games: {user['games']}\n🎁 Cases: {user['cases_opened']}\n\n⛏ Mining:\n"
+        txt += f"Card: {card['emoji']+' '+card['name'] if card else 'None'}\n"
+        txt += f"Mined: {user['mined_total']:,}\n"
+        txt += f"Business: {'Yes' if user['business'] else 'No'}\n"
+        txt += f"VIP: {'Yes' if user['vip'] else 'No'}\n"
+        txt += f"\nEarned: {user['earned']:,}\nLost: {user['lost']:,}"
+        kb = [[InlineKeyboardButton("Collect Mining", callback_data="collect")], [InlineKeyboardButton("Back", callback_data="menu")]]
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "collect_mining":
-        income = collect_mining(user)
-        if income > 0:
-            await query.answer(f"Collected: {income:,}")
-        else:
-            await query.answer("No income")
-        await button_handler(update, context)
+    elif q.data == "collect":
+        inc = collect_mining(user)
+        await q.answer(f"Collected: {inc:,}" if inc else "Nothing to collect")
+        await buttons(update, context)
     
-    elif query.data == "casino":
-        keyboard = [
+    elif q.data == "casino":
+        kb = [
             [InlineKeyboardButton("🪙 Coin (x2)", callback_data="game_coin")],
             [InlineKeyboardButton("🎲 Dice (x2)", callback_data="game_dice")],
             [InlineKeyboardButton("🎰 Slots (x5)", callback_data="game_slots")],
-            [InlineKeyboardButton("↩️ Back", callback_data="menu")],
+            [InlineKeyboardButton("Back", callback_data="menu")],
         ]
-        await query.edit_message_text(
-            f"🎰 *Casino*\n💰 Balance: `{user['balance']:,}`\n\nChoose game:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await q.edit_message_text(f"🎰 Casino\nBalance: {user['balance']:,}\nChoose:", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "mining":
-        card_level = user.get("video_card", 0)
-        card_info = VIDEO_CARDS.get(card_level)
-        pending = calculate_mining_income(user)
-        
-        if card_info:
-            text = f"⛏ *Mining Farm*\n\n🖥 Card: {card_info['emoji']} *{card_info['name']}*\n💰 Income: `{card_info['income']:,}`/hour\n💎 Mined: `{user.get('mined_total', 0):,}`\n⏳ Pending: `{pending:,}`"
+    elif q.data == "mining":
+        card = VIDEO_CARDS.get(user["video_card"])
+        pending = mining_income(user)
+        if card:
+            txt = f"⛏ Mining\n\nCard: {card['emoji']} {card['name']}\nIncome: {card['income']:,}/h\nMined: {user['mined_total']:,}\nPending: {pending:,}"
         else:
-            text = "⛏ *Mining Farm*\n\n❌ No card!\n🛍 Buy in shop.\n\n💰 *Card Incomes:*\n"
-            for level, card in VIDEO_CARDS.items():
-                text += f"{card['emoji']} {card['name']}: `{card['income']:,}`/hour\n"
-        
-        keyboard = []
+            txt = "⛏ Mining\n\nNo card!\nBuy in shop.\n\nCards:\n"
+            for l, c in VIDEO_CARDS.items():
+                txt += f"{c['emoji']} {c['name']}: {c['income']:,}/h\n"
+        kb = []
         if pending > 0:
-            keyboard.append([InlineKeyboardButton("💰 Collect", callback_data="collect_mining")])
-        keyboard.append([InlineKeyboardButton("🛍 Shop", callback_data="shop")])
-        keyboard.append([InlineKeyboardButton("↩️ Back", callback_data="menu")])
-        
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            kb.append([InlineKeyboardButton("Collect", callback_data="collect")])
+        kb.append([InlineKeyboardButton("Shop", callback_data="shop")])
+        kb.append([InlineKeyboardButton("Back", callback_data="menu")])
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "cases":
-        keyboard = [
-            [InlineKeyboardButton(f"📦 Common - {CASES['common']['price']:,}", callback_data="open_common")],
-            [InlineKeyboardButton(f"🎁 Rare - {CASES['rare']['price']:,}", callback_data="open_rare")],
-            [InlineKeyboardButton(f"💎 Epic - {CASES['epic']['price']:,}", callback_data="open_epic")],
-            [InlineKeyboardButton(f"👑 Legendary - {CASES['legendary']['price']:,}", callback_data="open_legendary")],
-            [InlineKeyboardButton("↩️ Back", callback_data="menu")],
+    elif q.data == "cases":
+        kb = [
+            [InlineKeyboardButton(f"Common - {CASES['common']['price']:,}", callback_data="open_common")],
+            [InlineKeyboardButton(f"Rare - {CASES['rare']['price']:,}", callback_data="open_rare")],
+            [InlineKeyboardButton(f"Epic - {CASES['epic']['price']:,}", callback_data="open_epic")],
+            [InlineKeyboardButton(f"Legendary - {CASES['legendary']['price']:,}", callback_data="open_legendary")],
+            [InlineKeyboardButton("Back", callback_data="menu")],
         ]
-        await query.edit_message_text(
-            "🎁 *Cases*\n\nChoose case to open:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await q.edit_message_text("🎁 Cases\nChoose:", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data.startswith("open_"):
-        case_type = query.data.replace("open_", "")
-        case = CASES.get(case_type)
-        
+    elif q.data.startswith("open_"):
+        ct = q.data.replace("open_", "")
+        case = CASES.get(ct)
         if not case:
-            await query.answer("Case not found")
             return
-        
         if user["balance"] < case["price"]:
-            await query.answer(f"Need {case['price']:,}")
+            await q.answer(f"Need {case['price']:,}")
             return
-        
         user["balance"] -= case["price"]
         reward = random.choice(case["rewards"])
         if random.random() < 0.05:
             reward = case["rewards"][-1]
-        
         user["balance"] += reward
-        user["cases_opened"] = user.get("cases_opened", 0) + 1
-        user["earned"] = user.get("earned", 0) + reward
-        save_database()
-        
-        text = f"🎁 *Case Opened*\n\n📦 *{case['name']}*\n💵 Cost: `{case['price']:,}`\n🎉 Win: `{reward:,}`\n💰 Balance: `{user['balance']:,}`"
+        user["cases_opened"] += 1
+        user["earned"] += reward
+        save_db()
+        txt = f"🎁 Case: {case['name']}\nCost: {case['price']:,}\nWin: {reward:,}\nBalance: {user['balance']:,}"
         if reward == case["rewards"][-1]:
-            text += "\n\n🔥 *JACKPOT!*"
-        
-        keyboard = [
-            [InlineKeyboardButton("🎁 Open More", callback_data="cases")],
-            [InlineKeyboardButton("↩️ Menu", callback_data="menu")]
-        ]
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            txt += "\n\nJACKPOT!"
+        kb = [[InlineKeyboardButton("Open More", callback_data="cases")], [InlineKeyboardButton("Menu", callback_data="menu")]]
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "shop":
-        text = "🛍 *Shop*\n\n*Video Cards:*\n\n"
-        for level, card in VIDEO_CARDS.items():
-            owned = user.get("video_card", 0) >= level
-            text += f"{card['emoji']} *{card['name']}*\n💰 Income: `{card['income']:,}`/h\n💵 Price: `{card['price']:,}`\nStatus: {'✅ Owned' if owned else '❌'}\n\n"
-        
-        text += f"🏪 *Business:*\n💵 Price: `100,000`\nStatus: {'✅' if user.get('business') else '❌'}\n\n💎 *VIP:*\n💵 Price: `200,000`\nStatus: {'✅' if user.get('vip') else '❌'}\n"
-        
-        keyboard = []
-        for level, card in VIDEO_CARDS.items():
-            if user.get("video_card", 0) < level:
-                keyboard.append([InlineKeyboardButton(f"{card['emoji']} {card['name']} - {card['price']:,}", callback_data=f"buy_card_{level}")])
-        
-        if not user.get("business"):
-            keyboard.append([InlineKeyboardButton("🏪 Business - 100,000", callback_data="buy_business")])
-        if not user.get("vip"):
-            keyboard.append([InlineKeyboardButton("💎 VIP - 200,000", callback_data="buy_vip")])
-        keyboard.append([InlineKeyboardButton("↩️ Back", callback_data="menu")])
-        
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    elif q.data == "shop":
+        txt = "🛍 Shop\n\nCards:\n\n"
+        for l, c in VIDEO_CARDS.items():
+            owned = user["video_card"] >= l
+            txt += f"{c['emoji']} {c['name']}: {c['income']:,}/h - {c['price']:,} {'✅' if owned else ''}\n"
+        txt += f"\nBusiness: 100,000 {'✅' if user['business'] else ''}\nVIP: 200,000 {'✅' if user['vip'] else ''}"
+        kb = []
+        for l, c in VIDEO_CARDS.items():
+            if user["video_card"] < l:
+                kb.append([InlineKeyboardButton(f"{c['emoji']} {c['name']} - {c['price']:,}", callback_data=f"buyc_{l}")])
+        if not user["business"]:
+            kb.append([InlineKeyboardButton("Business - 100,000", callback_data="buyb")])
+        if not user["vip"]:
+            kb.append([InlineKeyboardButton("VIP - 200,000", callback_data="buyv")])
+        kb.append([InlineKeyboardButton("Back", callback_data="menu")])
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data.startswith("buy_card_"):
-        level = int(query.data.replace("buy_card_", ""))
-        card = VIDEO_CARDS.get(level)
-        if not card:
-            await query.answer("Card not found")
+    elif q.data.startswith("buyc_"):
+        l = int(q.data.replace("buyc_", ""))
+        c = VIDEO_CARDS[l]
+        if user["video_card"] >= l:
+            await q.answer("Better card owned")
             return
-        if user.get("video_card", 0) >= level:
-            await query.answer("Better card owned!")
+        if user["balance"] < c["price"]:
+            await q.answer(f"Need {c['price']:,}")
             return
-        if user["balance"] < card["price"]:
-            await query.answer(f"Need {card['price']:,}")
-            return
-        
-        user["balance"] -= card["price"]
-        user["video_card"] = level
+        user["balance"] -= c["price"]
+        user["video_card"] = l
         user["mining_start"] = datetime.datetime.now().isoformat()
-        save_database()
-        
-        await query.answer(f"Bought {card['name']}!")
-        keyboard = [[InlineKeyboardButton("↩️ Shop", callback_data="shop")]]
-        await query.edit_message_text(
-            f"✅ *Purchased!*\n\n🖥 *{card['name']}*\n💰 Income: `{card['income']:,}`/h\n💵 Cost: `{card['price']:,}`\n💳 Balance: `{user['balance']:,}`\n\n⛏ Mining started!",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        save_db()
+        await q.answer(f"Bought {c['name']}!")
+        kb = [[InlineKeyboardButton("Shop", callback_data="shop")]]
+        await q.edit_message_text(f"Bought {c['name']}!\nIncome: {c['income']:,}/h\nBalance: {user['balance']:,}", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "buy_business":
-        if user.get("business"):
-            await query.answer("Already owned!")
+    elif q.data == "buyb":
+        if user["business"]:
             return
         if user["balance"] < 100000:
-            await query.answer("Need 100,000")
+            await q.answer("Need 100,000")
             return
-        
         user["balance"] -= 100000
         user["business"] = True
-        save_database()
-        
-        await query.answer("Business bought!")
-        keyboard = [[InlineKeyboardButton("↩️ Shop", callback_data="shop")]]
-        await query.edit_message_text("✅ *Business bought!*\n💰 +5,000 to bonus", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        save_db()
+        await q.answer("Business bought!")
+        kb = [[InlineKeyboardButton("Shop", callback_data="shop")]]
+        await q.edit_message_text("Business bought!\n+5,000 to bonus", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "buy_vip":
-        if user.get("vip"):
-            await query.answer("VIP active!")
+    elif q.data == "buyv":
+        if user["vip"]:
             return
         if user["balance"] < 200000:
-            await query.answer("Need 200,000")
+            await q.answer("Need 200,000")
             return
-        
         user["balance"] -= 200000
         user["vip"] = True
-        save_database()
-        
-        await query.answer("VIP activated!")
-        keyboard = [[InlineKeyboardButton("↩️ Shop", callback_data="shop")]]
-        await query.edit_message_text("✅ *VIP activated!*\n💰 x2 wins & bonus", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        save_db()
+        await q.answer("VIP activated!")
+        kb = [[InlineKeyboardButton("Shop", callback_data="shop")]]
+        await q.edit_message_text("VIP activated!\nx2 wins", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data in ["game_coin", "game_dice", "game_slots"]:
-        games = {"game_coin": "🪙 Coin", "game_dice": "🎲 Dice", "game_slots": "🎰 Slots"}
-        user["current_game"] = query.data
-        save_database()
-        
-        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel")]]
-        await query.edit_message_text(
-            f"*{games[query.data]}*\n\n💰 Balance: `{user['balance']:,}`\n\nEnter bet:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+    elif q.data in ["game_coin", "game_dice", "game_slots"]:
+        user["current_game"] = q.data
+        save_db()
+        kb = [[InlineKeyboardButton("Cancel", callback_data="cancel")]]
+        await q.edit_message_text(f"Game selected\nBalance: {user['balance']:,}\nEnter bet:", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "cancel":
+    elif q.data == "cancel":
         user["current_game"] = None
-        save_database()
-        keyboard = [
-            [InlineKeyboardButton("🎰 Casino", callback_data="casino")],
-            [InlineKeyboardButton("↩️ Menu", callback_data="menu")]
-        ]
-        await query.edit_message_text("❌ Cancelled", reply_markup=InlineKeyboardMarkup(keyboard))
+        save_db()
+        kb = [[InlineKeyboardButton("Casino", callback_data="casino")], [InlineKeyboardButton("Menu", callback_data="menu")]]
+        await q.edit_message_text("Cancelled", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "daily":
-        today = datetime.date.today().isoformat()
+    elif q.data == "daily":
+        today = str(datetime.date.today())
         if user.get("last_daily") != today:
             bonus = DAILY_START
-            parts = [f"🎁 Base: +{DAILY_START:,}"]
-            if user.get("business"):
+            if user["business"]:
                 bonus += 5000
-                parts.append("🏪 Business: +5,000")
-            if user.get("vip"):
+            if user["vip"]:
                 bonus *= 2
-                parts.append("💎 VIP x2")
-            
             user["balance"] += bonus
             user["last_daily"] = today
             user["earned"] += bonus
-            save_database()
-            
-            text = f"✅ *Bonus!*\n\n" + "\n".join(parts) + f"\n\n💰 Total: `+{bonus:,}`\n💳 Balance: `{user['balance']:,}`"
-            keyboard = [[InlineKeyboardButton("↩️ Menu", callback_data="menu")]]
-            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            save_db()
+            kb = [[InlineKeyboardButton("Menu", callback_data="menu")]]
+            await q.edit_message_text(f"Bonus: +{bonus:,}\nBalance: {user['balance']:,}", reply_markup=InlineKeyboardMarkup(kb))
         else:
-            keyboard = [[InlineKeyboardButton("↩️ Menu", callback_data="menu")]]
-            await query.edit_message_text("❌ Already claimed!\n⏰ Tomorrow again", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            kb = [[InlineKeyboardButton("Menu", callback_data="menu")]]
+            await q.edit_message_text("Already claimed!", reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "top":
-        sorted_users = sorted(DB.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
-        text = "🏆 *Top-10*\n\n"
-        for i, (u_id, u_data) in enumerate(sorted_users, 1):
-            name = u_data["name"][:15]
-            vip = "👑" if u_data.get("vip") else ""
-            card = "⛏" if u_data.get("video_card", 0) > 0 else ""
-            text += f"{['🥇','🥈','🥉'][i-1] if i<4 else '👤'} {i}. {vip}{card}{name}: `{u_data['balance']:,}`\n"
-        
-        keyboard = [[InlineKeyboardButton("↩️ Back", callback_data="menu")]]
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    elif q.data == "top":
+        su = sorted(DB.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
+        txt = "Top-10:\n\n"
+        for i, (_, u) in enumerate(su, 1):
+            txt += f"{i}. {u['name'][:15]}: {u['balance']:,}\n"
+        kb = [[InlineKeyboardButton("Back", callback_data="menu")]]
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     
-    elif query.data == "menu":
-        keyboard = [
+    elif q.data == "menu":
+        kb = [
             [InlineKeyboardButton("👤 Profile", callback_data="profile")],
             [InlineKeyboardButton("🎰 Casino", callback_data="casino")],
             [InlineKeyboardButton("⛏ Mining", callback_data="mining")],
@@ -400,35 +288,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🎁 Bonus", callback_data="daily")],
             [InlineKeyboardButton("🏆 Top", callback_data="top")],
         ]
-        await query.edit_message_text(
-            "🎰 *Menu*\nChoose action:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await q.edit_message_text("Menu\nChoose:", reply_markup=InlineKeyboardMarkup(kb))
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def messages(update, context):
     uid = str(update.message.from_user.id)
-    name = update.message.from_user.username or update.message.from_user.first_name
-    user = get_user(uid, name)
-    
+    user = get_user(uid, update.message.from_user.first_name)
     if not user.get("current_game"):
         return
-    
     try:
         bet = int(update.message.text.strip())
     except:
-        await update.message.reply_text("❌ Enter number!")
+        await update.message.reply_text("Enter number!")
+        return
+    if bet < 1 or bet > user["balance"]:
+        await update.message.reply_text(f"Invalid bet! Balance: {user['balance']:,}")
         return
     
-    if bet < 1:
-        await update.message.reply_text("❌ Min 1!")
-        return
-    
-    if bet > user["balance"]:
-        await update.message.reply_text(f"❌ Low balance!\n💰 Balance: `{user['balance']:,}`", parse_mode='Markdown')
-        return
-    
-    vip = 2 if user.get("vip") else 1
+    vip = 2 if user["vip"] else 1
     game = user["current_game"]
     win = 0
     
@@ -436,29 +312,27 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         coin = random.choice(["Heads", "Tails"])
         if random.random() < 0.5:
             win = bet * 2 * vip
-            msg = f"🪙 {coin}\n✅ Win! +{win-bet:,}"
+            msg = f"🪙 {coin}\nWin! +{win-bet:,}"
         else:
-            msg = f"🪙 {coin}\n❌ Loss -{bet:,}"
-    
+            msg = f"🪙 {coin}\nLoss -{bet:,}"
     elif game == "game_dice":
         d1, d2 = random.randint(1,6), random.randint(1,6)
         total = d1 + d2
         if total % 2 == 0:
             win = bet * 2 * vip
-            msg = f"🎲 {d1}+{d2}={total} (Even)\n✅ Win! +{win-bet:,}"
+            msg = f"🎲 {d1}+{d2}={total} (Even)\nWin! +{win-bet:,}"
         else:
-            msg = f"🎲 {d1}+{d2}={total} (Odd)\n❌ Loss -{bet:,}"
-    
+            msg = f"🎲 {d1}+{d2}={total} (Odd)\nLoss -{bet:,}"
     elif game == "game_slots":
         s = random.choices(["🍒","🍋","🍊","7️⃣","💎","⭐"], k=3)
         if s[0] == s[1] == s[2]:
             win = bet * 5 * vip
-            msg = f"🎰 {' '.join(s)}\n🎉 JACKPOT! +{win-bet:,}"
+            msg = f"🎰 {' '.join(s)}\nJACKPOT! +{win-bet:,}"
         elif s[0] == s[1] or s[1] == s[2] or s[0] == s[2]:
             win = bet * 2 * vip
-            msg = f"🎰 {' '.join(s)}\n✅ Win! +{win-bet:,}"
+            msg = f"🎰 {' '.join(s)}\nWin! +{win-bet:,}"
         else:
-            msg = f"🎰 {' '.join(s)}\n❌ Loss -{bet:,}"
+            msg = f"🎰 {' '.join(s)}\nLoss -{bet:,}"
     
     user["balance"] += win - bet
     user["games"] += 1
@@ -467,20 +341,29 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         user["lost"] += bet
     user["current_game"] = None
-    save_database()
+    save_db()
     
-    keyboard = [
-        [InlineKeyboardButton("🎰 Play", callback_data="casino")],
-        [InlineKeyboardButton("↩️ Menu", callback_data="menu")]
-    ]
-    
-    await update.message.reply_text(
-        f"{msg}\n💰 Balance: `{user['balance']:,}`",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    kb = [[InlineKeyboardButton("Play", callback_data="casino")], [InlineKeyboardButton("Menu", callback_data="menu")]]
+    await update.message.reply_text(f"{msg}\nBalance: {user['balance']:,}", reply_markup=InlineKeyboardMarkup(kb))
 
-async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sorted_users = sorted(DB.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
-    text = "🏆 *Top-10*\n\n"
-    for i, (_, u) in enumerate(sorted_users
+async def auto_mining(context):
+    for u in DB.values():
+        inc = mining_income(u)
+        if inc > 0:
+            u["balance"] += inc
+            u["mined_total"] = u.get("mined_total", 0) + inc
+            u["mining_start"] = datetime.datetime.now().isoformat()
+    save_db()
+
+def main():
+    load_db()
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
+    app.job_queue.run_repeating(auto_mining, interval=3600, first=10)
+    print("Bot started!")
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
