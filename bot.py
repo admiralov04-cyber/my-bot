@@ -1,4 +1,4 @@
-import sqlite3  # Для работы с базой данных SQLite
+import sqlite3
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -15,10 +15,10 @@ from telegram.ext import (
 )
 import datetime
 import random
+import os
 
 
 # ⚙️ Загрузка токена из системной переменной API_TOKEN
-import os
 TOKEN = os.getenv("API_TOKEN")
 if not TOKEN:
     raise ValueError(
@@ -29,8 +29,8 @@ if not TOKEN:
 
 # --- НАСТРОЙКИ ---
 DB_NAME = "casino.db"
-DAILY_START = 10_000   # Начальный бонус за день
-DAILY_INCREMENT = 10_000  # Прибавка за каждый пропущенный день
+DAILY_START = 10_000
+DAILY_INCREMENT = 10_000
 
 
 # --- БАЗА ДАННЫХ ---
@@ -40,7 +40,6 @@ def init_db():
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             
-            # Создадим таблицу пользователей
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
@@ -51,7 +50,6 @@ def init_db():
                 );
             ''')
             
-            # Таблица магазина предметов
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS shop (
                     item_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +59,6 @@ def init_db():
                 );
             ''')
             
-            # Заполним магазин базовыми предметами, если он пуст
             if cursor.execute('SELECT COUNT(*) FROM shop').fetchone()[0] == 0:
                 items = [
                     ("Счастливая монета", 50_000, "Увеличивает шанс выигрыша"),
@@ -81,32 +78,27 @@ async def get_user(update):
     Возвращает словарь с ключами: user_id, username, balance, last_daily, current_game
     """
     try:
-        # Определяем user_id
         if isinstance(update, int):
             user_id = update
         elif hasattr(update, 'effective_user'):
             user_id = update.effective_user.id
-        elif hasattr(update, 'from_user'):  # Для callback_query
+        elif hasattr(update, 'from_user'):
             user_id = update.from_user.id
         else:
-            # Пробуем получить user_id из message
             user_id = update.message.from_user.id
 
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             
-            # Получаем username
             username = ""
             if hasattr(update, 'effective_user') and update.effective_user.username:
                 username = update.effective_user.username
             
-            # Проверяем/добавляем пользователя
             cursor.execute(
                 'INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)',
                 (user_id, username)
             )
             
-            # Обновляем username, если он изменился
             if username:
                 cursor.execute(
                     'UPDATE users SET username = ? WHERE user_id = ? AND username != ?',
@@ -115,7 +107,6 @@ async def get_user(update):
             
             conn.commit()
             
-            # Берём все данные пользователя
             data = cursor.execute(
                 'SELECT user_id, username, balance, last_daily, current_game FROM users WHERE user_id = ?',
                 (user_id,)
@@ -131,7 +122,7 @@ async def get_user(update):
             }
         return None
     except Exception as e:
-        print(f"❗️ Error in DB query: {str(e)}")
+        print(f"Error in DB query: {str(e)}")
         return None
 
 
@@ -156,7 +147,7 @@ async def save_balance(user_id: int, new_balance: int | None):
                 )
             conn.commit()
     except Exception as e:
-        print(f"❗️ Error saving balance for user {user_id}: {str(e)}")
+        print(f"Error saving balance for user {user_id}: {str(e)}")
 
 
 async def set_current_game(user_id: int, game_name: str):
@@ -170,12 +161,13 @@ async def set_current_game(user_id: int, game_name: str):
             )
             conn.commit()
     except Exception as e:
-        print(f"❗️ Error setting game for user {user_id}: {str(e)}")
+        print(f"Error setting game for user {user_id}: {str(e)}")
 
 
 # --- КОМАНДЫ И МЕНЮ ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
     await main_menu(update, context)
 
 
@@ -189,17 +181,21 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"Привет, *{update.effective_user.first_name}*!\nВыбери действие:"
+    
+    try:
+        user_name = update.effective_user.first_name
+    except AttributeError:
+        user_name = update.callback_query.from_user.first_name
+    
+    text = f"Привет, *{user_name}*!\nВыбери действие:"
 
     try:
-        # Если это команда /start
         await update.message.reply_text(
             text, 
             parse_mode=constants.ParseMode.MARKDOWN, 
             reply_markup=reply_markup
         )
     except AttributeError:
-        # Если это callback (кнопка "Назад")
         query = update.callback_query
         await query.edit_message_text(
             text, 
@@ -261,7 +257,6 @@ async def game_bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_data is None:
         return
     
-    # Сохраняем выбранную игру в БД
     await set_current_game(user_data['user_id'], query.data)
     
     keyboard = [[InlineKeyboardButton("↩️ Отмена", callback_data="cancel_bet")]]
@@ -310,17 +305,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает топ-10 игроков"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT username, balance FROM users ORDER BY balance DESC LIMIT 10")
-    leaders = cursor.fetchall()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, balance FROM users ORDER BY balance DESC LIMIT 10")
+        leaders = cursor.fetchall()
+        conn.close()
 
-    msg = "🏆 Топ самых богатых игроков:\n"
-    for i, (username, bal) in enumerate(leaders, 1):
-        name = username if username else "Аноним"
-        msg += f"{i}. {name}: {bal:,} 🪙\n"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+        msg = "🏆 Топ самых богатых игроков:\n"
+        for i, (username, bal) in enumerate(leaders, 1):
+            name = username if username else "Аноним"
+            msg += f"{i}. {name}: {bal:,} 🪙\n"
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Error in top command: {e}")
+        await update.message.reply_text("❌ Ошибка при получении топа игроков.")
 
 
 async def daily_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -341,7 +340,6 @@ async def daily_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bonus = DAILY_START
         new_balance = user_data["balance"] + bonus
 
-        # Обновляем баланс и дату последнего бонуса
         try:
             with sqlite3.connect(DB_NAME) as conn:
                 cursor = conn.cursor()
@@ -351,7 +349,7 @@ async def daily_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 conn.commit()
         except Exception as e:
-            print(f"❗️ Error updating daily bonus: {str(e)}")
+            print(f"Error updating daily bonus: {str(e)}")
             await query.edit_message_text("❌ Ошибка при начислении бонуса.")
             return
 
@@ -379,32 +377,34 @@ async def show_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cur = conn.cursor()
 
-    buttons = []
-    for row in cur.execute("SELECT item_id, name, price FROM shop"):
-        item_id, name, price = row
-        button_name = f"{name} 💰 {price:,}"
-        buttons.append([InlineKeyboardButton(button_name, callback_data=f"buy_{item_id}")])
+        buttons = []
+        for row in cur.execute("SELECT item_id, name, price FROM shop"):
+            item_id, name, price = row
+            button_name = f"{name} 💰 {price:,}"
+            buttons.append([InlineKeyboardButton(button_name, callback_data=f"buy_{item_id}")])
 
-    # Кнопка возврата
-    buttons.append(
-        [InlineKeyboardButton("↩️ Назад", callback_data="mainmenu")]
-    )
+        buttons.append(
+            [InlineKeyboardButton("↩️ Назад", callback_data="mainmenu")]
+        )
 
-    # Текст со списком товаров
-    text = "*Добро пожаловать в магазин!*\n"
-    for name, price, desc in cur.execute("SELECT name, price, description FROM shop"):
-        text += f"\n• {name}\nЦена: {price:,} 🪙\n{desc}"
+        text = "*Добро пожаловать в магазин!*\n"
+        for name, price, desc in cur.execute("SELECT name, price, description FROM shop"):
+            text += f"\n• {name}\nЦена: {price:,} 🪙\n{desc}"
 
-    conn.close()
+        conn.close()
 
-    await query.edit_message_text(
-        text=text,
-        parse_mode=constants.ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(buttons),
-    )
+        await query.edit_message_text(
+            text=text,
+            parse_mode=constants.ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+    except Exception as e:
+        print(f"Error showing shop: {e}")
+        await query.edit_message_text("❌ Ошибка при загрузке магазина.")
 
 
 async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -412,56 +412,57 @@ async def process_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    _, item_id = query.data.split("_")
-    item_id = int(item_id)
+    try:
+        _, item_id = query.data.split("_")
+        item_id = int(item_id)
 
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name, price FROM shop WHERE item_id = ?", (item_id,))
-    result = cursor.fetchone()
-    conn.close()
-    
-    if not result:
-        await query.edit_message_text("Ошибка: товар не найден!")
-        return
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, price FROM shop WHERE item_id = ?", (item_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            await query.edit_message_text("Ошибка: товар не найден!")
+            return
 
-    item_name, item_price = result
+        item_name, item_price = result
 
-    user_data = await get_user(update)
-    if user_data is None:
-        return
+        user_data = await get_user(update)
+        if user_data is None:
+            return
 
-    current_balance = user_data["balance"]
+        current_balance = user_data["balance"]
 
-    if current_balance < item_price:
-        keyboard = [[InlineKeyboardButton("↩️ Назад", callback_data="shop")]]
+        if current_balance < item_price:
+            keyboard = [[InlineKeyboardButton("↩️ Назад", callback_data="shop")]]
+            await query.edit_message_text(
+                f"❌ Недостаточно средств для покупки '{item_name}'. "
+                f"Ваш баланс: {current_balance:,}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
+        new_balance = current_balance - item_price
+        await save_balance(user_id=user_data["user_id"], new_balance=new_balance)
+
+        keyboard = [[InlineKeyboardButton("↩️ В главное меню", callback_data="mainmenu")]]
+        
         await query.edit_message_text(
-            f"❌ Недостаточно средств для покупки '{item_name}'. "
-            f"Ваш баланс: {current_balance:,}",
+            f"✅ Вы купили '{item_name}' за {item_price:,} монет!\n"
+            f"Ваш новый баланс: *{new_balance:,}* 🪙",
+            parse_mode=constants.ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        return
-
-    # Покупка успешна
-    new_balance = current_balance - item_price
-    await save_balance(user_id=user_data["user_id"], new_balance=new_balance)
-
-    keyboard = [[InlineKeyboardButton("↩️ В главное меню", callback_data="mainmenu")]]
-    
-    await query.edit_message_text(
-        f"✅ Вы купили '{item_name}' за {item_price:,} монет!\n"
-        f"Ваш новый баланс: *{new_balance:,}* 🪙",
-        parse_mode=constants.ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    except Exception as e:
+        print(f"Error processing purchase: {e}")
+        await query.edit_message_text("❌ Ошибка при обработке покупки.")
 
 
 # --- ОБРАБОТКА СТАВОК ---
 
 async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Обрабатывает ставку пользователя
-    """
+    """Обрабатывает ставку пользователя"""
     user_data = await get_user(update)
     if user_data is None:
         return
@@ -472,33 +473,39 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bet_text = update.message.text.replace(",", "").replace(" ", "")
 
-    # Пытаемся преобразовать введённое значение в целое число
     try:
         bet = int(bet_text)
     except ValueError:
-        await update.message.reply_text("❌ Пожалуйста, введите числовое значение.", parse_mode="Markdown")
+        await update.message.reply_text(
+            "❌ Пожалуйста, введите целое число (сумму ставки).",
+            parse_mode="Markdown"
+        )
         return
 
     if bet <= 0:
-        await update.message.reply_text("Ставка должна быть больше нуля!", parse_mode="Markdown")
+        await update.message.reply_text(
+            "Ставка должна быть больше нуля!",
+            parse_mode="Markdown"
+        )
         return
 
     if bet > user_data["balance"]:
-        await update.message.reply_text("❌ Недостаточно средств на балансе.", parse_mode="Markdown")
+        await update.message.reply_text(
+            "❌ Недостаточно средств на балансе.",
+            parse_mode="Markdown"
+        )
         return
 
     result_msg = ""
     win_amount = 0
 
-    # Логика игр
     if selected_game == "coin_flip":
         coin = random.choice(["орёл", "решка"])
-        # Для простоты - 50% шанс победы
         won = random.choice([True, False])
         
         result_msg = f"🤏 Выпал *{coin}*."
         if won:
-            win_amount = int(bet * 2)  # Выигрыш x2
+            win_amount = int(bet * 2)
             result_msg += " Вы угадали! Победа!"
         else:
             result_msg += " Вы не угадали. Проигрыш."
@@ -514,13 +521,9 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             result_msg = f"🎲 Выпало {dice1} + {dice2} = *{total}* (Нечет). Проигрыш."
 
-    # Считаем новый баланс
     new_balance = user_data["balance"] - bet + win_amount
-
-    # Сохраняем изменения
     await save_balance(user_id=user_data["user_id"], new_balance=new_balance)
 
-    # Создаем кнопки для продолжения игры
     play_again_buttons = [
         [InlineKeyboardButton("🎲 Играть снова", callback_data="casino")],
         [InlineKeyboardButton("↩️ Главное меню", callback_data="mainmenu")]
@@ -547,20 +550,36 @@ async def process_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-if __name__ == "__main__":
-    init_db()
+# --- ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ ---
 
+async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик неизвестных сообщений"""
+    await update.message.reply_text(
+        "❓ Неизвестная команда. Используйте /start для начала работы с ботом."
+    )
+
+
+# --- ЗАПУСК БОТА ---
+
+if __name__ == "__main__":
+    print("Initializing database...")
+    init_db()
+    
+    print("Building application...")
     app = ApplicationBuilder().token(TOKEN).build()
 
     # Команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top", top))
 
-    # Обработчик кнопок (должен быть один)
+    # Обработчик всех кнопок
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # Ввод суммы ставок (только числа)
+    # Обработчик ввода ставок (только числа)
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^\d+$"), process_bet))
 
-    print("Бот запущен...")
+    # Обработчик неизвестных сообщений (должен быть последним)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
+
+    print("Bot is starting...")
     app.run_polling(drop_pending_updates=True)
