@@ -769,8 +769,11 @@ async def messages(update, context):
     )
 
 def main():
+    global TREASURY
     load_db()
     TREASURY += random.randint(50000, 200000)
+    if TREASURY > TREASURY_LIMIT:
+        TREASURY = TREASURY_LIMIT
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
