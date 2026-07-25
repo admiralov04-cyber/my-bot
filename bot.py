@@ -10,9 +10,19 @@ DB = {}
 CARD_BASE_PRICE = 5000
 CARD_BASE_INCOME = 100
 TREASURY = 0
-TREASURY_LIMIT = 10000000
+TREASURY_LIMIT = 100000000
 BANK_PERCENT = 5
 CHANNEL_URL = "https://t.me/GovTRR"
+
+# Новые бизнесы
+BUSINESSES = {
+    1: {"name": "🏪 Ларёк", "price": 100000, "income": 10000, "tax": 500},
+    2: {"name": "🚗 Автомойка", "price": 200000, "income": 20000, "tax": 1000},
+    3: {"name": "🏪 Магазин 24/7", "price": 450000, "income": 50000, "tax": 2500},
+    4: {"name": "🚙 Автосалон", "price": 5000000, "income": 250000, "tax": 10000},
+    5: {"name": "🏗 Строительная компания", "price": 20000000, "income": 1000000, "tax": 50000},
+    6: {"name": "🏭 Завод", "price": 50000000, "income": 2500000, "tax": 100000},
+}
 
 CASES = {
     "common": {"name": "Обычный", "price": 5000, "rewards": [1000, 2000, 3000, 5000, 10000]},
@@ -49,7 +59,7 @@ def get_user(uid, name=None):
     if uid not in DB:
         DB[uid] = {
             "name": name or "Игрок", "balance": 10000, "last_daily": None,
-            "current_game": None, "business": False, "vip": False,
+            "current_game": None, "businesses": [],
             "cards": 1, "cards_income": CARD_BASE_INCOME, "cards_price": CARD_BASE_PRICE,
             "tax_balance": 0, "tax_limit": 5000000, "mining_start": None, "mined_total": 0,
             "reg_date": datetime.datetime.now().strftime("%d.%m.%Y в %H:%M:%S"),
@@ -57,6 +67,7 @@ def get_user(uid, name=None):
             "energy": 10, "rating": 0, "exp": 0,
             "last_robbery": None, "robbery_success": 0, "robbery_fail": 0,
             "bank_balance": 0, "bank_time": None,
+            "vip": False, "biz_start": None,
         }
         save_db()
     return DB[uid]
@@ -77,6 +88,78 @@ def mi(user):
     inc = user.get("cards_income", CARD_BASE_INCOME)
     return {"cards": c, "inc": inc, "total": c * inc, "price": user.get("cards_price", CARD_BASE_PRICE), "tax": user.get("tax_balance", 0), "tlim": user.get("tax_limit", 5000000)}
 
+def get_businesses_info(user):
+    biz_list = user.get("businesses", [])
+    total_income = 0
+    total_tax = 0
+    info_text = ""
+    
+    for biz_id in biz_list:
+        biz = BUSINESSES.get(biz_id)
+        if biz:
+            total_income += biz["income"]
+            total_tax += biz["tax"]
+            info_text += f"  {biz['name']}: +{biz['income']:,}/ч (налог {biz['tax']:,})\n"
+    
+    return {
+        "count": len(biz_list),
+        "max": 2,
+        "total_income": total_income,
+        "total_tax": total_tax,
+        "info": info_text
+    }
+
+def buy_business(user, biz_id):
+    biz = BUSINESSES.get(biz_id)
+    if not biz:
+        return False, "❌ Бизнес не найден!"
+    
+    if biz_id in user.get("businesses", []):
+        return False, "❌ Этот бизнес уже куплен!"
+    
+    if len(user.get("businesses", [])) >= 2:
+        return False, "❌ Максимум 2 бизнеса!"
+    
+    if user["balance"] < biz["price"]:
+        return False, f"❌ Недостаточно средств! Нужно {biz['price']:,} 🪙"
+    
+    user["balance"] -= biz["price"]
+    if "businesses" not in user:
+        user["businesses"] = []
+    user["businesses"].append(biz_id)
+    user["tax_balance"] = user.get("tax_balance", 0) + biz["tax"]
+    
+    if not user.get("biz_start"):
+        user["biz_start"] = datetime.datetime.now().isoformat()
+    
+    save_db()
+    return True, f"✅ Куплен бизнес: {biz['name']}!\n💰 Доход: {biz['income']:,}/ч\n💸 Налог: {biz['tax']:,}"
+
+def collect_business_income(user):
+    if not user.get("businesses") or not user.get("biz_start"):
+        return 0
+    
+    biz_info = get_businesses_info(user)
+    if biz_info["total_income"] == 0:
+        return 0
+    
+    try:
+        start = datetime.datetime.fromisoformat(user["biz_start"])
+        hours = (datetime.datetime.now() - start).total_seconds() / 3600
+        income = max(0, int(hours * biz_info["total_income"]))
+    except:
+        return 0
+    
+    if income > 0:
+        user["balance"] += income
+        user["earned"] = user.get("earned", 0) + income
+        user["biz_start"] = datetime.datetime.now().isoformat()
+        # Начисляем налоги
+        user["tax_balance"] = user.get("tax_balance", 0) + int(income * 0.05)
+        save_db()
+    
+    return income
+
 def bc(user):
     info = mi(user)
     p = info["price"]
@@ -87,7 +170,7 @@ def bc(user):
     user["cards_price"] = int(p * 1.5)
     if user["cards"] % 10 == 0:
         user["cards_income"] = int(user["cards_income"] * 1.2)
-    user["tax_balance"] += int(p * 0.05)
+    user["tax_balance"] = user.get("tax_balance", 0) + int(p * 0.05)
     save_db()
     return True, p
 
@@ -140,7 +223,7 @@ def try_robbery(user):
         TREASURY -= stolen
         user["balance"] += stolen
         user["robbery_success"] = user.get("robbery_success", 0) + 1
-        user["earned"] += stolen
+        user["earned"] = user.get("earned", 0) + stolen
         save_db()
         return f"🦹 Ограбление казны!\n\n✅ Успех! +{stolen:,} 🪙\n💰 Баланс: {user['balance']:,}\n🏦 В казне: {TREASURY:,}"
     else:
@@ -224,8 +307,8 @@ def get_main_keyboard(uid):
         [InlineKeyboardButton("👤 Профиль", callback_data="p")],
         [InlineKeyboardButton("🎰 Казино", callback_data="c")],
         [InlineKeyboardButton("⛏ Майнинг", callback_data="m")],
+        [InlineKeyboardButton("🏪 Бизнесы", callback_data="biz")],
         [InlineKeyboardButton("🎁 Кейсы", callback_data="cs")],
-        [InlineKeyboardButton("🛍 Магазин", callback_data="s")],
         [InlineKeyboardButton("🎁 Бонус", callback_data="d")],
         [InlineKeyboardButton("🏆 Топ", callback_data="t")],
         [InlineKeyboardButton("📢 Наш канал", url=CHANNEL_URL)],
@@ -260,8 +343,10 @@ async def buttons(update, context):
 
     if d == "p":
         cm(user)
+        collect_business_income(user)
         user = get_user(uid)
         info = mi(user)
+        biz_info = get_businesses_info(user)
         bank_int = calculate_bank_interest(user)
         txt = f"👤 {user['name']}\n\n"
         txt += f"🪪 ID: {uid}\n"
@@ -269,9 +354,56 @@ async def buttons(update, context):
         txt += f"🏦 В банке: {fm(user.get('bank_balance', 0))}"
         if bank_int > 0:
             txt += f" (+{fm(bank_int)})"
-        txt += f"\n💎 Майнинг: {fm(user['mined_total'])}\n💸 Налог: {user['tax_balance']:,}\n🖥 Карт: {info['cards']} шт.\n💷 Доход: {info['total']:,}/ч\n🎲 Игр: {user['games']}\n🦹 Ограблений: {user.get('robbery_success', 0)}\n📅 {user['reg_date']}"
-        kb = [[InlineKeyboardButton("⛏ Собрать", callback_data="cl")], [InlineKeyboardButton("💰 Налог", callback_data="pt")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
+        txt += f"\n💎 Майнинг: {fm(user['mined_total'])}\n"
+        txt += f"💸 Налог: {user['tax_balance']:,}\n"
+        txt += f"🖥 Карт: {info['cards']} шт.\n💷 Доход майнинга: {info['total']:,}/ч\n"
+        txt += f"🏪 Бизнесов: {biz_info['count']}/{biz_info['max']}\n"
+        txt += f"💷 Доход бизнесов: {biz_info['total_income']:,}/ч\n"
+        txt += f"🎲 Игр: {user['games']}\n🦹 Ограблений: {user.get('robbery_success', 0)}\n📅 {user['reg_date']}"
+        kb = [[InlineKeyboardButton("⛏ Собрать майнинг", callback_data="cl")], [InlineKeyboardButton("🏪 Собрать бизнес", callback_data="cbiz")], [InlineKeyboardButton("💰 Налог", callback_data="pt")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+    
+    elif d == "cbiz":
+        inc = collect_business_income(user)
+        await q.answer(f"Собрано с бизнесов: {inc:,} 🪙" if inc > 0 else "Нечего собирать")
+    
+    elif d == "biz":
+        biz_info = get_businesses_info(user)
+        txt = f"🏪 Бизнесы ({biz_info['count']}/{biz_info['max']})\n\n"
+        
+        if biz_info['count'] > 0:
+            txt += "Ваши бизнесы:\n"
+            for biz_id in user.get("businesses", []):
+                biz = BUSINESSES.get(biz_id)
+                if biz:
+                    txt += f"✅ {biz['name']}: +{biz['income']:,}/ч\n"
+            txt += f"\n💰 Общий доход: {biz_info['total_income']:,}/ч\n"
+            txt += f"💸 Налог: {biz_info['total_tax']:,}/ч\n"
+            txt += f"⏳ Ожидает: {collect_business_income(user) if False else 'нажмите собрать'}\n\n"
+        else:
+            txt += "У вас пока нет бизнесов!\n\n"
+        
+        txt += "Доступные бизнесы:\n\n"
+        for biz_id, biz in BUSINESSES.items():
+            owned = biz_id in user.get("businesses", [])
+            txt += f"{biz['name']}\n"
+            txt += f"💰 Доход: {biz['income']:,}/ч\n"
+            txt += f"💵 Цена: {biz['price']:,} 🪙\n"
+            txt += f"💸 Налог: {biz['tax']:,}/ч\n"
+            txt += f"Статус: {'✅ Куплен' if owned else '❌'}\n\n"
+        
+        kb = []
+        for biz_id, biz in BUSINESSES.items():
+            if biz_id not in user.get("businesses", []) and len(user.get("businesses", [])) < 2:
+                kb.append([InlineKeyboardButton(f"{biz['name']} - {biz['price']:,}🪙", callback_data=f"bbiz_{biz_id}")])
+        kb.append([InlineKeyboardButton("↩️ Назад", callback_data="mn")])
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+    
+    elif d.startswith("bbiz_"):
+        biz_id = int(d.replace("bbiz_", ""))
+        ok, msg = buy_business(user, biz_id)
+        await q.answer(msg)
+    
     elif d == "cl":
         inc = cm(user)
         await q.answer(f"+{inc:,}" if inc > 0 else "Нечего")
@@ -318,7 +450,7 @@ async def buttons(update, context):
             reward = case["rewards"][-1]
         user["balance"] += reward
         user["cases_opened"] += 1
-        user["earned"] += reward
+        user["earned"] = user.get("earned", 0) + reward
         TREASURY += int(case["price"] * 0.1)
         save_db()
         txt = f"🎁 {case['name']}\n💰 +{reward:,}\n💳 {user['balance']:,}"
@@ -326,32 +458,20 @@ async def buttons(update, context):
             txt = "🔥 ДЖЕКПОТ!\n" + txt
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎁 Ещё", callback_data="cs")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]))
     elif d == "s":
-        kb = [[InlineKeyboardButton("🏪 Бизнес", callback_data="sb")], [InlineKeyboardButton("💎 VIP", callback_data="sv")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
-        await q.edit_message_text("🛍 Магазин", reply_markup=InlineKeyboardMarkup(kb))
-    elif d == "sb":
-        kb = []
-        if not user["business"]:
-            kb.append([InlineKeyboardButton("Купить - 100,000", callback_data="bb")])
-        kb.append([InlineKeyboardButton("↩️ Назад", callback_data="s")])
-        await q.edit_message_text(f"🏪 Бизнес\n100,000\n{'✅' if user['business'] else '❌'}", reply_markup=InlineKeyboardMarkup(kb))
+        kb = [[InlineKeyboardButton("💎 VIP", callback_data="sv")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
+        await q.edit_message_text("🛍 Магазин\n\nVIP дает:\n• x2 выигрыши в казино\n• +15% к шансу ограбления\n• x2 ежедневный бонус", reply_markup=InlineKeyboardMarkup(kb))
     elif d == "sv":
         kb = []
-        if not user["vip"]:
+        if not user.get("vip"):
             kb.append([InlineKeyboardButton("Купить - 200,000", callback_data="bv")])
         kb.append([InlineKeyboardButton("↩️ Назад", callback_data="s")])
-        await q.edit_message_text(f"💎 VIP\n200,000\n{'✅' if user['vip'] else '❌'}", reply_markup=InlineKeyboardMarkup(kb))
-    elif d == "bb":
-        if not user["business"] and user["balance"] >= 100000:
-            user["balance"] -= 100000
-            user["business"] = True
-            save_db()
-        await q.answer("✅" if user["business"] else "❌")
+        await q.edit_message_text(f"💎 VIP\n200,000 🪙\n{'✅ Активен' if user.get('vip') else '❌'}", reply_markup=InlineKeyboardMarkup(kb))
     elif d == "bv":
-        if not user["vip"] and user["balance"] >= 200000:
+        if not user.get("vip") and user["balance"] >= 200000:
             user["balance"] -= 200000
             user["vip"] = True
             save_db()
-        await q.answer("✅" if user["vip"] else "❌")
+        await q.answer("✅" if user.get("vip") else "❌")
     elif d in ["gc", "gd", "gs"]:
         gs = {"gc": "Монетка", "gd": "Кости", "gs": "Слоты"}
         user["current_game"] = d
@@ -364,11 +484,14 @@ async def buttons(update, context):
     elif d == "d":
         today = str(datetime.date.today())
         if user.get("last_daily") != today:
-            bonus = DAILY_START + (5000 if user["business"] else 0)
-            if user["vip"]:
+            bonus = DAILY_START
+            biz_info = get_businesses_info(user)
+            bonus += biz_info["total_income"] // 10
+            if user.get("vip"):
                 bonus *= 2
             user["balance"] += bonus
             user["last_daily"] = today
+            user["earned"] = user.get("earned", 0) + bonus
             save_db()
             await q.edit_message_text(f"✅ +{bonus:,}\n💰 {user['balance']:,}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Меню", callback_data="mn")]]))
         else:
@@ -410,22 +533,17 @@ async def buttons(update, context):
 
 async def messages(update, context):
     global TREASURY
-    
     if not update.message or not update.message.text:
         return
-    
     uid = str(update.message.from_user.id)
     name = update.message.from_user.first_name or update.message.from_user.username
     user = get_user(uid, name)
     admin = is_admin(uid)
     text = update.message.text.strip().lower()
 
-    # Банк
     if text == "банк":
         await update.message.reply_text(show_bank(user))
         return
-
-    # Банк - положить
     if text.startswith("банк "):
         parts = text.split()
         if len(parts) >= 2:
@@ -436,8 +554,6 @@ async def messages(update, context):
             except:
                 await update.message.reply_text("❌ Пример: банк 1000")
         return
-
-    # Снять
     if text.startswith("снять "):
         parts = text.split()
         if len(parts) >= 2:
@@ -460,8 +576,6 @@ async def messages(update, context):
                 except:
                     await update.message.reply_text("❌ Пример: снять 500")
         return
-
-    # Перевести
     if text.startswith("перевести ") or text.startswith("перевод "):
         parts = text.split()
         if len(parts) >= 3:
@@ -475,14 +589,10 @@ async def messages(update, context):
         else:
             await update.message.reply_text("❌ Пример: перевести ID сумма")
         return
-
-    # Ограбить казну
     if text in ["ограбить казну", "ограбить", "ограбление"]:
         result = try_robbery(user)
         await update.message.reply_text(result)
         return
-
-    # Админ
     if admin and context.user_data.get("action"):
         act = context.user_data["action"]
         if act == "give":
@@ -520,24 +630,18 @@ async def messages(update, context):
                 pass
             context.user_data["action"] = None
             return
-
-    # Игры
     if not user.get("current_game"):
         return
-
     try:
         bet = int(text)
     except:
         return
-
     if bet < 1 or bet > user["balance"]:
         await update.message.reply_text(f"❌ Неверно!\n💰 {user['balance']:,} 🪙")
         return
-
-    vip = 2 if user["vip"] else 1
+    vip = 2 if user.get("vip") else 1
     game = user["current_game"]
     win = 0
-
     if game == "gc":
         coin = random.choice(["Орёл", "Решка"])
         win = bet * 2 * vip if random.random() < 0.5 else 0
@@ -554,24 +658,16 @@ async def messages(update, context):
         elif s[0] == s[1] or s[1] == s[2] or s[0] == s[2]:
             win = bet * 2 * vip
         msg = f"🎰 {' '.join(s)}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,} 🪙"
-
     user["balance"] += win - bet
     user["games"] += 1
     if win > 0:
-        user["earned"] += win - bet
+        user["earned"] = user.get("earned", 0) + win - bet
     else:
-        user["lost"] += bet
+        user["lost"] = user.get("lost", 0) + bet
         TREASURY += int(bet * 0.05)
     user["current_game"] = None
     save_db()
-
-    await update.message.reply_text(
-        f"{msg}\n💰 Баланс: {user['balance']:,} 🪙",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎰 Играть", callback_data="c")],
-            [InlineKeyboardButton("↩️ Меню", callback_data="mn")]
-        ])
-    )
+    await update.message.reply_text(f"{msg}\n💰 Баланс: {user['balance']:,} 🪙", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть", callback_data="c")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]))
 
 def main():
     load_db()
@@ -579,7 +675,6 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
-    # Принимаем ВСЕ текстовые сообщения (и в группах тоже)
     app.add_handler(MessageHandler(filters.TEXT, messages))
     save_db()
     print("Бот запущен!")
