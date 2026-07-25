@@ -4,14 +4,14 @@ import sqlite3
 import datetime
 import random
 
-# Пробуем импортировать psycopg2, если не установлен - работаем только с SQLite
+# Пробуем импортировать psycopg2
 try:
     import psycopg2
     import psycopg2.extras
     POSTGRESQL_AVAILABLE = True
 except ImportError:
     POSTGRESQL_AVAILABLE = False
-    print("⚠️ psycopg2 не установлен, будем использовать SQLite")
+    print("⚠️ psycopg2 не установлен, используем SQLite")
 
 from telegram import (
     Update,
@@ -29,25 +29,20 @@ from telegram.ext import (
 )
 
 
-# ⚙️ Загрузка токенов из переменных окружения
+# ⚙️ Загрузка токенов
 TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not TOKEN:
-    raise ValueError(
-        "🛑 Ошибка! Переменная окружения API_TOKEN не найдена."
-        "\nПроверьте настройки вашего сервера."
-    )
+    raise ValueError("🛑 Ошибка! Переменная окружения API_TOKEN не найдена.")
 
 # Определяем тип базы данных
 if DATABASE_URL and POSTGRESQL_AVAILABLE:
     DB_TYPE = "postgresql"
-    print("✅ Используем PostgreSQL базу данных")
+    print("✅ Используем PostgreSQL")
 else:
     DB_TYPE = "sqlite"
-    if not POSTGRESQL_AVAILABLE and DATABASE_URL:
-        print("⚠️ DATABASE_URL есть, но psycopg2 не установлен. Используем SQLite")
-    print("✅ Используем SQLite базу данных")
+    print("✅ Используем SQLite")
 
 
 # --- НАСТРОЙКИ ---
@@ -57,7 +52,19 @@ DAILY_START = 10_000
 DAILY_INCREMENT = 10_000
 
 
-# --- ФУНКЦИИ БЭКАПА ДАННЫХ ---
+# --- РАБОТА С БАЗОЙ ДАННЫХ ---
+
+def get_db_connection():
+    """Получает соединение с базой данных"""
+    try:
+        if DB_TYPE == "postgresql" and POSTGRESQL_AVAILABLE:
+            return psycopg2.connect(DATABASE_URL)
+        else:
+            return sqlite3.connect(DB_NAME)
+    except Exception as e:
+        print(f"❌ Ошибка подключения к БД: {e}")
+        return sqlite3.connect(DB_NAME)
+
 
 def backup_all_data():
     """Сохраняет все данные в JSON файл"""
@@ -101,21 +108,25 @@ def restore_from_backup():
         cursor = conn.cursor()
         
         for user in users_data:
-            if DB_TYPE == "postgresql":
-                cursor.execute(
-                    '''INSERT INTO users (user_id, username, balance, last_daily, current_game) 
-                       VALUES (%s, %s, %s, %s, %s) 
-                       ON CONFLICT (user_id) DO NOTHING''',
-                    (user["user_id"], user["username"], user["balance"], 
-                     user["last_daily"], user["current_game"])
-                )
-            else:
-                cursor.execute(
-                    '''INSERT OR IGNORE INTO users (user_id, username, balance, last_daily, current_game) 
-                       VALUES (?, ?, ?, ?, ?)''',
-                    (user["user_id"], user["username"], user["balance"], 
-                     user["last_daily"], user["current_game"])
-                )
+            try:
+                if DB_TYPE == "postgresql" and POSTGRESQL_AVAILABLE:
+                    cursor.execute(
+                        '''INSERT INTO users (user_id, username, balance, last_daily, current_game) 
+                           VALUES (%s, %s, %s, %s, %s) 
+                           ON CONFLICT (user_id) DO NOTHING''',
+                        (user["user_id"], user["username"], user["balance"], 
+                         user["last_daily"], user["current_game"])
+                    )
+                else:
+                    cursor.execute(
+                        '''INSERT OR IGNORE INTO users (user_id, username, balance, last_daily, current_game) 
+                           VALUES (?, ?, ?, ?, ?)''',
+                        (user["user_id"], user["username"], user["balance"], 
+                         user["last_daily"], user["current_game"])
+                    )
+            except Exception as e:
+                print(f"Ошибка восстановления пользователя {user.get('user_id')}: {e}")
+                continue
         
         conn.commit()
         cursor.close()
@@ -128,32 +139,13 @@ def restore_from_backup():
         return False
 
 
-# --- РАБОТА С БАЗОЙ ДАННЫХ ---
-
-def get_db_connection():
-    """Получает соединение с базой данных"""
-    try:
-        if DB_TYPE == "postgresql":
-            conn = psycopg2.connect(DATABASE_URL)
-            return conn
-        else:
-            conn = sqlite3.connect(DB_NAME)
-            conn.row_factory = sqlite3.Row
-            return conn
-    except Exception as e:
-        print(f"❌ Ошибка подключения к БД: {e}")
-        # Возвращаем SQLite как запасной вариант
-        return sqlite3.connect(DB_NAME)
-
-
 def init_db():
     """Инициализация базы данных"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        if DB_TYPE == "postgresql":
-            # PostgreSQL синтаксис
+        if DB_TYPE == "postgresql" and POSTGRESQL_AVAILABLE:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
@@ -173,22 +165,21 @@ def init_db():
                 );
             ''')
             
-            # Проверяем наличие товаров
             cursor.execute('SELECT COUNT(*) FROM shop')
             count = cursor.fetchone()[0]
             
             if count == 0:
                 items = [
-                    ("Счастливая монета", 50_000, "Увеличивает шанс выигрыша"),
-                    ("Удвоитель опыта", 75_000, "Временное удвоение всех выигрышей"),
-                    ("VIP-статус", 200_000, "Открывает эксклюзивные игры"),
+                    ("Счастливая монета", 50000, "Увеличивает шанс выигрыша"),
+                    ("Удвоитель опыта", 75000, "Временное удвоение всех выигрышей"),
+                    ("VIP-статус", 200000, "Открывает эксклюзивные игры"),
                 ]
-                cursor.executemany(
-                    'INSERT INTO shop (name, price, description) VALUES (%s, %s, %s)', 
-                    items
-                )
+                for item in items:
+                    cursor.execute(
+                        'INSERT INTO shop (name, price, description) VALUES (%s, %s, %s)',
+                        item
+                    )
         else:
-            # SQLite синтаксис
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
@@ -208,18 +199,17 @@ def init_db():
                 );
             ''')
             
-            # Проверяем наличие товаров
             cursor.execute('SELECT COUNT(*) FROM shop')
             count = cursor.fetchone()[0]
             
             if count == 0:
                 items = [
-                    ("Счастливая монета", 50_000, "Увеличивает шанс выигрыша"),
-                    ("Удвоитель опыта", 75_000, "Временное удвоение всех выигрышей"),
-                    ("VIP-статус", 200_000, "Открывает эксклюзивные игры"),
+                    ("Счастливая монета", 50000, "Увеличивает шанс выигрыша"),
+                    ("Удвоитель опыта", 75000, "Временное удвоение всех выигрышей"),
+                    ("VIP-статус", 200000, "Открывает эксклюзивные игры"),
                 ]
                 cursor.executemany(
-                    'INSERT INTO shop (name, price, description) VALUES (?, ?, ?)', 
+                    'INSERT INTO shop (name, price, description) VALUES (?, ?, ?)',
                     items
                 )
         
@@ -228,7 +218,7 @@ def init_db():
         conn.close()
         print(f"[INFO] База данных инициализирована ({DB_TYPE})")
         
-        # Пробуем восстановить данные из бэкапа
+        # Восстанавливаем данные из бэкапа
         restore_from_backup()
         
     except Exception as e:
@@ -236,7 +226,7 @@ def init_db():
 
 
 async def get_user(user_id_or_update):
-    """Получает данные пользователя из базы"""
+    """Получает данные пользователя"""
     try:
         # Определяем user_id
         if isinstance(user_id_or_update, int):
@@ -258,22 +248,25 @@ async def get_user(user_id_or_update):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        if DB_TYPE == "postgresql":
-            # PostgreSQL
+        if DB_TYPE == "postgresql" and POSTGRESQL_AVAILABLE:
             cursor.execute(
                 '''INSERT INTO users (user_id, username) 
                    VALUES (%s, %s) 
-                   ON CONFLICT (user_id) DO UPDATE 
-                   SET username = CASE WHEN users.username = '' THEN EXCLUDED.username ELSE users.username END''',
+                   ON CONFLICT (user_id) DO NOTHING''',
                 (user_id, username)
             )
+            
+            if username:
+                cursor.execute(
+                    'UPDATE users SET username = %s WHERE user_id = %s AND username = %s',
+                    (username, user_id, '')
+                )
             
             cursor.execute(
                 'SELECT user_id, username, balance, last_daily, current_game FROM users WHERE user_id = %s',
                 (user_id,)
             )
         else:
-            # SQLite
             cursor.execute(
                 'INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)',
                 (user_id, username)
@@ -314,7 +307,7 @@ async def save_balance(user_id: int, new_balance: int = None):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        if DB_TYPE == "postgresql":
+        if DB_TYPE == "postgresql" and POSTGRESQL_AVAILABLE:
             if new_balance is None:
                 cursor.execute(
                     'UPDATE users SET current_game = NULL WHERE user_id = %s',
@@ -341,21 +334,21 @@ async def save_balance(user_id: int, new_balance: int = None):
         cursor.close()
         conn.close()
         
-        # Сохраняем бэкап после изменения баланса
+        # Сохраняем бэкап
         backup_all_data()
         
         print(f"✅ Баланс обновлен для пользователя {user_id}: {new_balance}")
     except Exception as e:
-        print(f"❌ Ошибка сохранения баланса для {user_id}: {e}")
+        print(f"❌ Ошибка сохранения баланса: {e}")
 
 
 async def set_current_game(user_id: int, game_name: str):
-    """Устанавливает текущую игру пользователя"""
+    """Устанавливает текущую игру"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        if DB_TYPE == "postgresql":
+        if DB_TYPE == "postgresql" and POSTGRESQL_AVAILABLE:
             cursor.execute(
                 'UPDATE users SET current_game = %s WHERE user_id = %s',
                 (game_name, user_id)
@@ -371,7 +364,7 @@ async def set_current_game(user_id: int, game_name: str):
         conn.close()
         print(f"🎮 Игра установлена: {game_name} для пользователя {user_id}")
     except Exception as e:
-        print(f"❌ Ошибка установки игры для {user_id}: {e}")
+        print(f"❌ Ошибка установки игры: {e}")
 
 
 # --- КОМАНДЫ И МЕНЮ ---
@@ -382,7 +375,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Главное меню с кнопками"""
+    """Главное меню"""
     keyboard = [
         [InlineKeyboardButton("💰 Баланс", callback_data="show_balance")],
         [InlineKeyboardButton("🎲 Казино", callback_data="casino")],
@@ -400,7 +393,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             user_name = "Игрок"
     
-    text = f"🎰 *Казино-Бот* 🎰\n\nПривет, *{user_name}*!\nТвой баланс будет сохранен!\n\nВыбери действие:"
+    text = f"🎰 *Казино-Бот*\n\nПривет, *{user_name}*!\nВыбери действие:"
 
     try:
         await update.message.reply_text(
@@ -418,7 +411,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает баланс пользователя"""
+    """Показывает баланс"""
     query = update.callback_query
     await query.answer()
     
@@ -437,7 +430,7 @@ async def show_balance_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def casino_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает меню казино"""
+    """Меню казино"""
     query = update.callback_query
     await query.answer()
     
@@ -455,7 +448,7 @@ async def casino_keyboard_handler(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def game_bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запрашивает ставку для выбранной игры"""
+    """Запрос ставки"""
     query = update.callback_query
     await query.answer()
     
@@ -477,7 +470,7 @@ async def game_bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"🎮 *{game_name}*\n\n"
         f"💰 Ваш баланс: `{user_data['balance']:,}` 🪙\n\n"
-        f"✏️ *Введите сумму ставки числом:*"
+        f"✏️ *Введите сумму ставки:*"
     )
     
     await query.edit_message_text(
@@ -488,31 +481,30 @@ async def game_bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Главный обработчик всех кнопок"""
+    """Обработчик кнопок"""
     query = update.callback_query
     await query.answer()
 
-    print(f"🔘 Нажата кнопка: {query.data}")
-
-    handlers = {
-        "mainmenu": main_menu,
-        "show_balance": show_balance_handler,
-        "daily": daily_handler,
-        "shop": show_shop,
-        "casino": casino_keyboard_handler,
-        "coin_flip": game_bet_handler,
-        "dice_roll": game_bet_handler,
-        "cancel_bet": cancel_bet_handler,
-    }
-    
-    if query.data in handlers:
-        await handlers[query.data](update, context)
+    if query.data == "mainmenu":
+        await main_menu(update, context)
+    elif query.data == "show_balance":
+        await show_balance_handler(update, context)
+    elif query.data == "daily":
+        await daily_handler(update, context)
+    elif query.data == "shop":
+        await show_shop(update, context)
+    elif query.data == "casino":
+        await casino_keyboard_handler(update, context)
+    elif query.data in ["coin_flip", "dice_roll"]:
+        await game_bet_handler(update, context)
+    elif query.data == "cancel_bet":
+        await cancel_bet_handler(update, context)
     elif query.data.startswith("buy_"):
         await process_purchase(update, context)
 
 
 async def cancel_bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет текущую ставку"""
+    """Отмена ставки"""
     query = update.callback_query
     await query.answer()
     
@@ -532,7 +524,7 @@ async def cancel_bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает топ-10 игроков"""
+    """Топ-10 игроков"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -541,7 +533,7 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.close()
         conn.close()
 
-        msg = "🏆 *Топ-10 богатых игроков:*\n\n"
+        msg = "🏆 *Топ-10 игроков:*\n\n"
         for i, (username, bal) in enumerate(leaders, 1):
             name = username if username else "Аноним"
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👤"
@@ -549,12 +541,12 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
-        print(f"❌ Ошибка получения топа: {e}")
-        await update.message.reply_text("❌ Ошибка при получении топа игроков.")
+        print(f"❌ Ошибка топа: {e}")
+        await update.message.reply_text("❌ Ошибка при получении топа.")
 
 
 async def daily_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ежедневного бонуса"""
+    """Ежедневный бонус"""
     query = update.callback_query
     await query.answer()
     
@@ -567,7 +559,6 @@ async def daily_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     last_date = user_data["last_daily"]
     
-    # Нормализуем дату для сравнения
     if last_date:
         if hasattr(last_date, 'isoformat'):
             last_date = last_date.isoformat()
@@ -576,25 +567,13 @@ async def daily_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if last_date is None or last_date != today:
         bonus = DAILY_START
-        
-        # Проверяем, не пропустил ли пользователь дни
-        if last_date:
-            try:
-                last_date_obj = datetime.date.fromisoformat(last_date)
-                today_obj = datetime.date.today()
-                days_diff = (today_obj - last_date_obj).days
-                if days_diff > 1:
-                    bonus += DAILY_INCREMENT * (days_diff - 1)
-            except:
-                pass
-        
         new_balance = user_data["balance"] + bonus
 
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            if DB_TYPE == "postgresql":
+            if DB_TYPE == "postgresql" and POSTGRESQL_AVAILABLE:
                 cursor.execute(
                     'UPDATE users SET balance = %s, last_daily = %s WHERE user_id = %s',
                     (new_balance, today, user_data["user_id"])
@@ -609,4 +588,24 @@ async def daily_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.close()
             conn.close()
             
-            # Сохраняем
+            backup_all_data()
+            
+        except Exception as e:
+            print(f"❌ Ошибка бонуса: {e}")
+            await query.edit_message_text("❌ Ошибка при начислении бонуса.")
+            return
+
+        keyboard = [[InlineKeyboardButton("↩️ В меню", callback_data="mainmenu")]]
+        
+        await query.edit_message_text(
+            f"✅ *Бонус получен!*\n\n"
+            f"🎁 Бонус: `{bonus:,}` 🪙\n"
+            f"💰 Баланс: `{new_balance:,}` 🪙",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        keyboard = [[InlineKeyboardButton("↩️ В меню", callback_data="mainmenu")]]
+        
+        await query.edit_message_text(
+         
