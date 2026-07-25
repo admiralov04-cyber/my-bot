@@ -12,6 +12,7 @@ CARD_BASE_INCOME = 100
 TREASURY = 0
 TREASURY_LIMIT = 10000000
 BANK_PERCENT = 5
+CHANNEL_URL = "https://t.me/GovTRR"
 
 CASES = {
     "common": {"name": "Обычный", "price": 5000, "rewards": [1000, 2000, 3000, 5000, 10000]},
@@ -157,7 +158,7 @@ def deposit_bank(user, amount):
     user["bank_balance"] = user.get("bank_balance", 0) + amount
     user["bank_time"] = datetime.datetime.now().isoformat()
     save_db()
-    return f"✅ Положено в банк: {amount:,} 🪙\n🏦 В банке: {user['bank_balance']:,} 🪙\n💰 Баланс: {user['balance']:,} 🪙"
+    return f"✅ Положено: {amount:,} 🪙\n🏦 В банке: {user['bank_balance']:,}\n💰 Баланс: {user['balance']:,}"
 
 def withdraw_bank(user, amount):
     bank = user.get("bank_balance", 0)
@@ -166,12 +167,12 @@ def withdraw_bank(user, amount):
     interest = calculate_bank_interest(user)
     total = bank + interest
     if amount > total:
-        return f"❌ В банке с процентами: {total:,} 🪙"
+        return f"❌ В банке: {total:,} 🪙"
     user["bank_balance"] = total - amount
     user["bank_time"] = datetime.datetime.now().isoformat()
     user["balance"] += amount
     save_db()
-    return f"✅ Снято: {amount:,} 🪙\n💰 Баланс: {user['balance']:,}\n🏦 В банке: {user['bank_balance']:,} 🪙"
+    return f"✅ Снято: {amount:,} 🪙\n💰 Баланс: {user['balance']:,}\n🏦 В банке: {user['bank_balance']:,}"
 
 def calculate_bank_interest(user):
     bank = user.get("bank_balance", 0)
@@ -195,20 +196,18 @@ def add_treasury():
 def show_bank(user):
     bank_balance = user.get("bank_balance", 0)
     bank_int = calculate_bank_interest(user)
-    txt = "🏦 *Банк*\n\n"
-    txt += f"💰 На счету: `{user['balance']:,}` 🪙\n"
-    txt += f"🏦 В банке: `{bank_balance:,}` 🪙\n"
+    txt = "🏦 Банк\n\n"
+    txt += f"💰 На счету: {user['balance']:,} 🪙\n"
+    txt += f"🏦 В банке: {bank_balance:,} 🪙\n"
     if bank_int > 0:
-        txt += f"📈 Проценты: `+{bank_int:,}` 🪙\n"
-    txt += f"💹 Ставка: `{BANK_PERCENT}%` в день\n\n"
-    txt += "📥 *Положить* - `банк [сумма]`\n"
-    txt += "📤 *Снять* - `снять [сумма]`\n"
-    txt += "📤 *Снять все* - `снять все`"
+        txt += f"📈 Проценты: +{bank_int:,} 🪙\n"
+    txt += f"💹 Ставка: {BANK_PERCENT}% в день\n\n"
+    txt += "📥 Положить: банк [сумма]\n"
+    txt += "📤 Снять: снять [сумма]\n"
+    txt += "📤 Снять все: снять все"
     return txt
 
-async def start(update, context):
-    u = update.effective_user
-    get_user(u.id, u.first_name)
+def get_main_keyboard(uid):
     kb = [
         [InlineKeyboardButton("👤 Профиль", callback_data="p")],
         [InlineKeyboardButton("🎰 Казино", callback_data="c")],
@@ -217,9 +216,16 @@ async def start(update, context):
         [InlineKeyboardButton("🛍 Магазин", callback_data="s")],
         [InlineKeyboardButton("🎁 Бонус", callback_data="d")],
         [InlineKeyboardButton("🏆 Топ", callback_data="t")],
+        [InlineKeyboardButton("📢 Наш канал", url=CHANNEL_URL)],
     ]
-    if is_admin(str(u.id)):
+    if is_admin(uid):
         kb.append([InlineKeyboardButton("⚙️ Админ", callback_data="a")])
+    return kb
+
+async def start(update, context):
+    u = update.effective_user
+    get_user(u.id, u.first_name)
+    kb = get_main_keyboard(str(u.id))
     await update.message.reply_text(f"🎰 Lucky Casino\n\nПривет, {u.first_name}!", reply_markup=InlineKeyboardMarkup(kb))
 
 async def buttons(update, context):
@@ -239,18 +245,10 @@ async def buttons(update, context):
         user = get_user(uid)
         info = mi(user)
         bank_int = calculate_bank_interest(user)
-        txt = f"👤 {user['name']}\n\n"
-        txt += f"💰 Баланс: {fm(user['balance'])}\n"
-        txt += f"🏦 В банке: {fm(user.get('bank_balance', 0))}"
+        txt = f"👤 {user['name']}\n\n💰 Баланс: {fm(user['balance'])}\n🏦 В банке: {fm(user.get('bank_balance', 0))}"
         if bank_int > 0:
             txt += f" (+{fm(bank_int)})"
-        txt += f"\n💎 Майнинг: {fm(user['mined_total'])}\n"
-        txt += f"💸 Налог: {user['tax_balance']:,}\n"
-        txt += f"🖥 Карт: {info['cards']} шт.\n"
-        txt += f"💷 Доход: {info['total']:,}/ч\n"
-        txt += f"🎲 Игр: {user['games']}\n"
-        txt += f"🦹 Ограблений: {user.get('robbery_success', 0)}\n"
-        txt += f"📅 {user['reg_date']}"
+        txt += f"\n💎 Майнинг: {fm(user['mined_total'])}\n💸 Налог: {user['tax_balance']:,}\n🖥 Карт: {info['cards']} шт.\n💷 Доход: {info['total']:,}/ч\n🎲 Игр: {user['games']}\n🦹 Ограблений: {user.get('robbery_success', 0)}\n📅 {user['reg_date']}"
         kb = [[InlineKeyboardButton("⛏ Собрать", callback_data="cl")], [InlineKeyboardButton("💰 Налог", callback_data="pt")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
     elif d == "cl":
@@ -286,7 +284,7 @@ async def buttons(update, context):
         await q.answer(f"Карт: {mi(user)['cards']}" if ok else f"Нужно {price:,}")
     elif d == "cs":
         kb = [[InlineKeyboardButton(f"📦 Обычный - {CASES['common']['price']:,}", callback_data="oc")], [InlineKeyboardButton(f"🎁 Редкий - {CASES['rare']['price']:,}", callback_data="or")], [InlineKeyboardButton(f"💎 Эпический - {CASES['epic']['price']:,}", callback_data="oe")], [InlineKeyboardButton(f"👑 Легендарный - {CASES['legendary']['price']:,}", callback_data="ol")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
-        await q.edit_message_text(f"🎁 Кейсы", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("🎁 Кейсы", reply_markup=InlineKeyboardMarkup(kb))
     elif d in ["oc", "or", "oe", "ol"]:
         ct = {"oc": "common", "or": "rare", "oe": "epic", "ol": "legendary"}[d]
         case = CASES[ct]
@@ -386,32 +384,20 @@ async def buttons(update, context):
         context.user_data["action"] = "send"
         await q.edit_message_text("Сообщение:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️", callback_data="a")]]))
     elif d == "mn":
-        kb = [
-            [InlineKeyboardButton("👤 Профиль", callback_data="p")],
-            [InlineKeyboardButton("🎰 Казино", callback_data="c")],
-            [InlineKeyboardButton("⛏ Майнинг", callback_data="m")],
-            [InlineKeyboardButton("🎁 Кейсы", callback_data="cs")],
-            [InlineKeyboardButton("🛍 Магазин", callback_data="s")],
-            [InlineKeyboardButton("🎁 Бонус", callback_data="d")],
-            [InlineKeyboardButton("🏆 Топ", callback_data="t")],
-        ]
-        if admin:
-            kb.append([InlineKeyboardButton("⚙️ Админ", callback_data="a")])
+        kb = get_main_keyboard(uid)
         await q.edit_message_text("🎰 Меню", reply_markup=InlineKeyboardMarkup(kb))
 
 async def messages(update, context):
     global TREASURY
-    uid = str(update.message.from_user.id)
-    user = get_user(uid, update.message.from_user.first_name)
+    uid = str(update.effective_user.id)
+    user = get_user(uid, update.effective_user.first_name)
     admin = is_admin(uid)
     text = update.message.text.strip().lower()
-    
-    # Банк
+
     if text in ["банк", "б"]:
-        await update.message.reply_text(show_bank(user), parse_mode='Markdown')
+        await update.message.reply_text(show_bank(user))
         return
-    
-    # Положить в банк
+
     if text.startswith("банк ") or text.startswith("б "):
         parts = text.split()
         if len(parts) == 2:
@@ -422,8 +408,7 @@ async def messages(update, context):
             except:
                 await update.message.reply_text("❌ Неверная сумма!")
         return
-    
-    # Снять из банка
+
     if text.startswith("снять "):
         parts = text.split()
         if len(parts) == 2:
@@ -435,7 +420,7 @@ async def messages(update, context):
                     user["bank_balance"] = 0
                     user["bank_time"] = None
                     save_db()
-                    await update.message.reply_text(f"✅ Снято все: {total:,} 🪙\n💰 Баланс: {user['balance']:,} 🪙")
+                    await update.message.reply_text(f"✅ Снято все: {total:,} 🪙\n💰 Баланс: {user['balance']:,}")
                 else:
                     await update.message.reply_text("❌ Банк пуст!")
             else:
@@ -446,14 +431,12 @@ async def messages(update, context):
                 except:
                     await update.message.reply_text("❌ Неверная сумма!")
         return
-    
-    # Ограбление казны
+
     if text in ["ограбить казну", "ограбление казны", "ограбить"]:
         result = try_robbery(user)
         await update.message.reply_text(result)
         return
-    
-    # Админские действия
+
     if admin and context.user_data.get("action"):
         act = context.user_data["action"]
         if act == "give":
@@ -491,25 +474,24 @@ async def messages(update, context):
                 pass
             context.user_data["action"] = None
             return
-    
-    # Игры
+
     if not user.get("current_game"):
         return
-    
+
     try:
         bet = int(text)
     except:
         await update.message.reply_text("❌ Число!")
         return
-    
+
     if bet < 1 or bet > user["balance"]:
         await update.message.reply_text("❌")
         return
-    
+
     vip = 2 if user["vip"] else 1
     game = user["current_game"]
     win = 0
-    
+
     if game == "gc":
         coin = random.choice(["Орёл", "Решка"])
         win = bet * 2 * vip if random.random() < 0.5 else 0
@@ -526,7 +508,7 @@ async def messages(update, context):
         elif s[0] == s[1] or s[1] == s[2] or s[0] == s[2]:
             win = bet * 2 * vip
         msg = f"🎰 {' '.join(s)}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,}"
-    
+
     user["balance"] += win - bet
     user["games"] += 1
     if win > 0:
@@ -536,7 +518,7 @@ async def messages(update, context):
         TREASURY += int(bet * 0.05)
     user["current_game"] = None
     save_db()
-    
+
     await update.message.reply_text(f"{msg}\n💰 {user['balance']:,}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть", callback_data="c")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]))
 
 def main():
