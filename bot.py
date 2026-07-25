@@ -2,7 +2,6 @@ import json
 import os
 import datetime
 import random
-import asyncio
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -28,19 +27,19 @@ DB = {}
 
 # Конфигурация видеокарт
 VIDEO_CARDS = {
-    1: {"name": "🟢 GTX 1060", "price": 30000, "income": 2500, "emoji": "🟢"},
-    2: {"name": "🔵 RTX 2060", "price": 50000, "income": 4500, "emoji": "🔵"},
-    3: {"name": "🟣 RTX 3060", "price": 70000, "income": 7000, "emoji": "🟣"},
-    4: {"name": "🟡 RTX 4070", "price": 100000, "income": 11000, "emoji": "🟡"},
-    5: {"name": "🔴 RTX 4090", "price": 150000, "income": 25000, "emoji": "🔴"},
+    1: {"name": "GTX 1060", "price": 30000, "income": 2500, "emoji": "🟢"},
+    2: {"name": "RTX 2060", "price": 50000, "income": 4500, "emoji": "🔵"},
+    3: {"name": "RTX 3060", "price": 70000, "income": 7000, "emoji": "🟣"},
+    4: {"name": "RTX 4070", "price": 100000, "income": 11000, "emoji": "🟡"},
+    5: {"name": "RTX 4090", "price": 150000, "income": 25000, "emoji": "🔴"},
 }
 
 # Конфигурация кейсов
 CASES = {
-    "common": {"name": "📦 Обычный кейс", "price": 5000, "rewards": [1000, 2000, 3000, 5000, 10000]},
-    "rare": {"name": "🎁 Редкий кейс", "price": 15000, "rewards": [5000, 10000, 20000, 35000, 50000]},
-    "epic": {"name": "💎 Эпический кейс", "price": 50000, "rewards": [15000, 30000, 50000, 100000, 200000]},
-    "legendary": {"name": "👑 Легендарный кейс", "price": 150000, "rewards": [50000, 100000, 200000, 500000, 1000000]},
+    "common": {"name": "Обычный кейс", "price": 5000, "rewards": [1000, 2000, 3000, 5000, 10000]},
+    "rare": {"name": "Редкий кейс", "price": 15000, "rewards": [5000, 10000, 20000, 35000, 50000]},
+    "epic": {"name": "Эпический кейс", "price": 50000, "rewards": [15000, 30000, 50000, 100000, 200000]},
+    "legendary": {"name": "Легендарный кейс", "price": 150000, "rewards": [50000, 100000, 200000, 500000, 1000000]},
 }
 
 # Загрузка данных
@@ -86,9 +85,9 @@ def get_user(user_id, username=None):
             "current_game": None,
             "business": False,
             "vip": False,
-            "video_card": 0,  # Уровень видеокарты (0 - нет)
-            "mining_start": None,  # Время начала майнинга
-            "mined_total": 0,  # Всего намайнено
+            "video_card": 0,
+            "mining_start": None,
+            "mined_total": 0,
             "reg_date": datetime.date.today().isoformat(),
             "earned": 0,
             "lost": 0,
@@ -184,7 +183,6 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # === ПРОФИЛЬ ===
     if query.data == "profile":
-        # Собираем доход от майнинга
         mining_income = collect_mining(user)
         user = get_user(uid, name)
         
@@ -198,10 +196,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📅 С нами с: `{user['reg_date']}`\n"
             f"🏆 Топ: `{pos}` из `{total}`\n"
             f"🎮 Игр: `{user['games']}`\n"
-            f"🎁 Кейсов открыто: `{user.get('cases_opened', 0)}`\n\n"
+            f"🎁 Кейсов: `{user.get('cases_opened', 0)}`\n\n"
             f"⛏ *Майнинг:*\n"
-            f"🖥 Видеокарта: {card_info['emoji'] + ' ' + card_info['name'] if card_info else '❌ Нет'}\n"
-            f"💎 Намайнено всего: `{user.get('mined_total', 0):,}` 🪙\n"
+        )
+        
+        if card_info:
+            text += f"🖥 Карта: {card_info['emoji']} *{card_info['name']}*\n"
+        else:
+            text += "🖥 Карта: ❌ Нет\n"
+        
+        text += (
+            f"💎 Намайнено: `{user.get('mined_total', 0):,}` 🪙\n"
             f"🏪 Бизнес: {'✅' if user['business'] else '❌'}\n"
             f"💎 Статус: {'👑 VIP' if user['vip'] else '⭐ Обычный'}\n\n"
             f"💚 Заработано: `{user['earned']:,}` 🪙\n"
@@ -209,7 +214,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         if mining_income > 0:
-            text += f"\n\n✅ Собрано с майнинга: `+{mining_income:,}` 🪙"
+            text += f"\n\n✅ Собрано: `+{mining_income:,}` 🪙"
         
         keyboard = [
             [InlineKeyboardButton("⛏ Собрать майнинг", callback_data="collect_mining")],
@@ -223,9 +228,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if income > 0:
             await query.answer(f"✅ Собрано: {income:,} 🪙")
         else:
-            await query.answer("❌ Нет дохода для сбора")
+            await query.answer("❌ Нет дохода")
         
-        # Обновляем профиль
         await buttons(update, context)
         return
     
@@ -252,44 +256,42 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if card_info:
             text = (
                 f"⛏ *Майнинг ферма*\n\n"
-                f"🖥 Видеокарта: *{card_info['name']}*\n"
+                f"🖥 Карта: {card_info['emoji']} *{card_info['name']}*\n"
                 f"💰 Доход: `{card_info['income']:,}` 🪙/час\n"
                 f"💎 Намайнено: `{user.get('mined_total', 0):,}` 🪙\n"
-                f"⏳ Ожидает сбора: `{pending:,}` 🪙\n\n"
-                f"⚡ *Улучшить видеокарту в магазине!*"
+                f"⏳ Ожидает: `{pending:,}` 🪙\n\n"
+                f"⚡ *Улучшить в магазине!*"
             )
         else:
             text = (
                 f"⛏ *Майнинг ферма*\n\n"
-                f"❌ У вас нет видеокарты!\n"
-                f"🛍 Купите видеокарту в магазине.\n\n"
-                f"💰 *Доход от майнинга:*\n"
+                f"❌ Нет видеокарты!\n"
+                f"🛍 Купите в магазине.\n\n"
+                f"💰 *Доходы карт:*\n"
             )
             for level, card in VIDEO_CARDS.items():
                 text += f"{card['emoji']} {card['name']}: `{card['income']:,}` 🪙/час\n"
         
-        keyboard = [
-            [InlineKeyboardButton("💰 Собрать доход", callback_data="collect_mining")] if pending > 0 else [],
-            [InlineKeyboardButton("🛍 В магазин", callback_data="shop")],
-            [InlineKeyboardButton("↩️ Назад", callback_data="menu")],
-        ]
-        # Убираем пустые кнопки
-        keyboard = [row for row in keyboard if row]
+        keyboard = []
+        if pending > 0:
+            keyboard.append([InlineKeyboardButton("💰 Собрать", callback_data="collect_mining")])
+        keyboard.append([InlineKeyboardButton("🛍 В магазин", callback_data="shop")])
+        keyboard.append([InlineKeyboardButton("↩️ Назад", callback_data="menu")])
         
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
     
     # === КЕЙСЫ ===
     elif query.data == "cases":
-        text = "🎁 *Кейсы*\n\nВыберите кейс для открытия:\n\n"
+        text = "🎁 *Кейсы*\n\nВыберите кейс:\n\n"
         
         for case_id, case in CASES.items():
-            text += f"{case['name']}: `{case['price']:,}` 🪙\n"
+            text += f"📦 *{case['name']}*: `{case['price']:,}` 🪙\n"
         
         keyboard = [
-            [InlineKeyboardButton(f"{CASES['common']['name']} - {CASES['common']['price']:,}🪙", callback_data="open_common")],
-            [InlineKeyboardButton(f"{CASES['rare']['name']} - {CASES['rare']['price']:,}🪙", callback_data="open_rare")],
-            [InlineKeyboardButton(f"{CASES['epic']['name']} - {CASES['epic']['price']:,}🪙", callback_data="open_epic")],
-            [InlineKeyboardButton(f"{CASES['legendary']['name']} - {CASES['legendary']['price']:,}🪙", callback_data="open_legendary")],
+            [InlineKeyboardButton(f"📦 Обычный - {CASES['common']['price']:,}🪙", callback_data="open_common")],
+            [InlineKeyboardButton(f"🎁 Редкий - {CASES['rare']['price']:,}🪙", callback_data="open_rare")],
+            [InlineKeyboardButton(f"💎 Эпический - {CASES['epic']['price']:,}🪙", callback_data="open_epic")],
+            [InlineKeyboardButton(f"👑 Легендарный - {CASES['legendary']['price']:,}🪙", callback_data="open_legendary")],
             [InlineKeyboardButton("↩️ Назад", callback_data="menu")],
         ]
         
@@ -301,20 +303,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         case = CASES.get(case_type)
         
         if not case:
-            await query.answer("❌ Кейс не найден")
+            await query.answer("Кейс не найден")
             return
         
         if user["balance"] < case["price"]:
-            await query.answer(f"❌ Недостаточно средств! Нужно {case['price']:,} 🪙")
+            await query.answer(f"Нужно {case['price']:,} 🪙")
             return
         
-        # Покупаем и открываем кейс
         user["balance"] -= case["price"]
         reward = random.choice(case["rewards"])
         
-        # Шанс на редкий дроп (5%)
         if random.random() < 0.05:
-            reward = case["rewards"][-1]  # Максимальная награда
+            reward = case["rewards"][-1]
         
         user["balance"] += reward
         user["cases_opened"] = user.get("cases_opened", 0) + 1
@@ -323,17 +323,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text = (
             f"🎁 *Открытие кейса*\n\n"
-            f"📦 Кейс: *{case['name']}*\n"
-            f"💵 Стоимость: `{case['price']:,}` 🪙\n"
+            f"📦 *{case['name']}*\n"
+            f"💵 Цена: `{case['price']:,}` 🪙\n"
             f"🎉 Выигрыш: `{reward:,}` 🪙\n"
             f"💰 Баланс: `{user['balance']:,}` 🪙"
         )
         
         if reward == case["rewards"][-1]:
-            text += "\n\n🔥 *JACKPOT! Максимальный выигрыш!*"
+            text += "\n\n🔥 *JACKPOT!*"
         
         keyboard = [
-            [InlineKeyboardButton("🎁 Открыть еще", callback_data="cases")],
+            [InlineKeyboardButton("🎁 Еще кейс", callback_data="cases")],
             [InlineKeyboardButton("↩️ Меню", callback_data="menu")]
         ]
         
@@ -341,23 +341,23 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # === МАГАЗИН ===
     elif query.data == "shop":
-        text = "🛍 *Магазин*\n\n*Видеокарты для майнинга:*\n\n"
+        text = "🛍 *Магазин*\n\n*Видеокарты:*\n\n"
         
         for level, card in VIDEO_CARDS.items():
-            owned = "✅" if user.get("video_card", 0) >= level else "💵"
+            owned = user.get("video_card", 0) >= level
             text += f"{card['emoji']} *{card['name']}*\n"
             text += f"💰 Доход: `{card['income']:,}` 🪙/час\n"
-            text += f"💵 Цена: `{card['price']:,}` 🪙\n\n"
+            text += f"💵 Цена: `{card['price']:,}` 🪙\n"
+            text += f"Статус: {'✅ Куплена' if owned else '❌'}\n\n"
         
-        text += "🏪 *Бизнес:*\n"
-        text += "💵 Цена: `100,000` 🪙\n"
-        text += "💰 Доход: `+5,000` к бонусу\n"
-        text += f"Статус: {'✅ Куплен' if user.get('business') else '❌ Не куплен'}\n\n"
-        
-        text += "💎 *VIP-статус:*\n"
-        text += "💵 Цена: `200,000` 🪙\n"
-        text += "💰 Доход: x2 выигрыши и бонус\n"
-        text += f"Статус: {'✅ Активен' if user.get('vip') else '❌ Не активен'}\n"
+        text += (
+            f"🏪 *Бизнес:*\n"
+            f"💵 Цена: `100,000` 🪙\n"
+            f"Статус: {'✅ Куплен' if user.get('business') else '❌'}\n\n"
+            f"💎 *VIP:*\n"
+            f"💵 Цена: `200,000` 🪙\n"
+            f"Статус: {'✅ Активен' if user.get('vip') else '❌'}\n"
+        )
         
         keyboard = []
         for level, card in VIDEO_CARDS.items():
@@ -368,30 +368,30 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )])
         
         if not user.get("business"):
-            keyboard.append([InlineKeyboardButton("🏪 Купить бизнес - 100,000🪙", callback_data="buy_business")])
+            keyboard.append([InlineKeyboardButton("🏪 Бизнес - 100,000🪙", callback_data="buy_business")])
         
         if not user.get("vip"):
-            keyboard.append([InlineKeyboardButton("💎 Купить VIP - 200,000🪙", callback_data="buy_vip")])
+            keyboard.append([InlineKeyboardButton("💎 VIP - 200,000🪙", callback_data="buy_vip")])
         
         keyboard.append([InlineKeyboardButton("↩️ Назад", callback_data="menu")])
         
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
     
-    # === ПОКУПКА ВИДЕОКАРТЫ ===
+    # === ПОКУПКА КАРТЫ ===
     elif query.data.startswith("buy_card_"):
         level = int(query.data.replace("buy_card_", ""))
         card = VIDEO_CARDS.get(level)
         
         if not card:
-            await query.answer("❌ Карта не найдена")
+            await query.answer("Карта не найдена")
             return
         
         if user.get("video_card", 0) >= level:
-            await query.answer("❌ У вас уже есть карта лучше!")
+            await query.answer("У вас уже есть карта лучше!")
             return
         
         if user["balance"] < card["price"]:
-            await query.answer(f"❌ Недостаточно средств! Нужно {card['price']:,} 🪙")
+            await query.answer(f"Нужно {card['price']:,} 🪙")
             return
         
         user["balance"] -= card["price"]
@@ -399,14 +399,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user["mining_start"] = datetime.datetime.now().isoformat()
         save_database()
         
-        await query.answer(f"✅ Куплена {card['name']}!")
+        await query.answer(f"Куплена {card['name']}!")
         
         keyboard = [[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]
         await query.edit_message_text(
-            f"✅ *Покупка успешна!*\n\n"
-            f"🖥 Видеокарта: *{card['name']}*\n"
+            f"✅ *Покупка!*\n\n"
+            f"🖥 *{card['name']}*\n"
             f"💰 Доход: `{card['income']:,}` 🪙/час\n"
-            f"💵 Потрачено: `{card['price']:,}` 🪙\n"
+            f"💵 Цена: `{card['price']:,}` 🪙\n"
             f"💳 Баланс: `{user['balance']:,}` 🪙\n\n"
             f"⛏ Майнинг запущен!",
             parse_mode='Markdown',
@@ -416,22 +416,22 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === ПОКУПКА БИЗНЕСА ===
     elif query.data == "buy_business":
         if user.get("business"):
-            await query.answer("❌ Бизнес уже куплен!")
+            await query.answer("Уже куплен!")
             return
         
         if user["balance"] < 100000:
-            await query.answer("❌ Недостаточно средств! Нужно 100,000 🪙")
+            await query.answer("Нужно 100,000 🪙")
             return
         
         user["balance"] -= 100000
         user["business"] = True
         save_database()
         
-        await query.answer("✅ Бизнес куплен!")
+        await query.answer("Бизнес куплен!")
         
         keyboard = [[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]
         await query.edit_message_text(
-            "✅ *Бизнес куплен!*\n💰 +5,000 к ежедневному бонусу",
+            "✅ *Бизнес куплен!*\n💰 +5,000 к бонусу",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -439,18 +439,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === ПОКУПКА VIP ===
     elif query.data == "buy_vip":
         if user.get("vip"):
-            await query.answer("❌ VIP уже активен!")
+            await query.answer("VIP уже активен!")
             return
         
         if user["balance"] < 200000:
-            await query.answer("❌ Недостаточно средств! Нужно 200,000 🪙")
+            await query.answer("Нужно 200,000 🪙")
             return
         
         user["balance"] -= 200000
         user["vip"] = True
         save_database()
         
-        await query.answer("✅ VIP активирован!")
+        await query.answer("VIP активирован!")
         
         keyboard = [[InlineKeyboardButton("↩️ В магазин", callback_data="shop")]]
         await query.edit_message_text(
@@ -507,12 +507,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user["earned"] += bonus
             save_database()
             
-            text = f"✅ *Бонус получен!*\n\n" + "\n".join(parts) + f"\n\n💰 Итого: `+{bonus:,}` 🪙\n💳 Баланс: `{user['balance']:,}` 🪙"
+            text = f"✅ *Бонус!*\n\n" + "\n".join(parts) + f"\n\n💰 Итого: `+{bonus:,}` 🪙\n💳 Баланс: `{user['balance']:,}` 🪙"
             keyboard = [[InlineKeyboardButton("↩️ Меню", callback_data="menu")]]
             await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
         else:
             keyboard = [[InlineKeyboardButton("↩️ Меню", callback_data="menu")]]
-            await query.edit_message_text("❌ Уже получен!\n⏰ Завтра будет снова", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.edit_message_text("❌ Уже получен!\n⏰ Завтра снова", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
     
     # === ТОП ===
     elif query.data == "top":
@@ -532,4 +532,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "menu":
         keyboard = [
             [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
-            [InlineKeyboardButton("🎰 Казино", callb
+            [InlineKeyboardButton("🎰 Казино", callback_data="casino")],
+            [InlineKeyboardButton("⛏ Майнинг", callback_data="mining")],
+            [InlineKeyboardButton("🎁 Кейсы", callback_data="cases")],
+            [InlineKeyboardButton("🛍 Магазин", callback_data="shop")],
+            [InlineKeyboardButton("🎁 Бонус", callback_data="daily")],
+            [InlineKeyboardButton("🏆 Топ", callback_data="top")],
+        ]
+        await query.edit_message_text(
+            "🎰 *Меню*\nВыберите действие:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+# Обработка ставок
+async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = str(upd
