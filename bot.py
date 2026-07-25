@@ -9,6 +9,8 @@ DAILY_START = 10000
 DB = {}
 CARD_BASE_PRICE = 5000
 CARD_BASE_INCOME = 100
+TREASURY = 0
+TREASURY_LIMIT = 1000000
 
 CASES = {
     "common": {"name": "Обычный", "price": 5000, "rewards": [1000, 2000, 3000, 5000, 10000]},
@@ -18,18 +20,21 @@ CASES = {
 }
 
 def load_db():
-    global DB
+    global DB, TREASURY
     try:
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                DB = json.loads(f.read() or "{}")
+                data = json.loads(f.read() or "{}")
+                DB = data.get("users", {})
+                TREASURY = data.get("treasury", 0)
     except:
         DB = {}
+        TREASURY = 0
 
 def save_db():
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(DB, f)
+            json.dump({"users": DB, "treasury": TREASURY}, f)
     except:
         pass
 
@@ -48,6 +53,7 @@ def get_user(uid, name=None):
             "reg_date": datetime.datetime.now().strftime("%d.%m.%Y в %H:%M:%S"),
             "earned": 0, "lost": 0, "games": 0, "cases_opened": 0,
             "energy": 10, "rating": 0, "exp": 0,
+            "last_robbery": None, "robbery_success": 0, "robbery_fail": 0,
         }
         save_db()
     return DB[uid]
@@ -89,6 +95,10 @@ def pt(user):
     paid = min(user["balance"], tax)
     user["balance"] -= paid
     user["tax_balance"] -= paid
+    global TREASURY
+    TREASURY += paid
+    if TREASURY > TREASURY_LIMIT:
+        TREASURY = TREASURY_LIMIT
     save_db()
     return True, paid
 
@@ -111,6 +121,65 @@ def cm(user):
         save_db()
     return income
 
+def try_robbery(user):
+    global TREASURY
+    
+    # Проверка: раз в день
+    today = str(datetime.date.today())
+    if user.get("last_robbery") == today:
+        return "❌ Вы уже грабили казну сегодня! Приходите завтра."
+    
+    if TREASURY <= 0:
+        return "🏦 Казна пуста! Подождите пополнения."
+    
+    # Шанс успеха
+    cards = user.get("cards", 1)
+    vip = user.get("vip", False)
+    base_chance = 30
+    card_bonus = min(cards * 2, 30)
+    vip_bonus = 15 if vip else 0
+    success_chance = min(base_chance + card_bonus + vip_bonus, 80)
+    
+    user["last_robbery"] = today
+    
+    if random.randint(1, 100) <= success_chance:
+        max_steal = min(TREASURY, user["balance"] * 2)
+        if max_steal < 1000:
+            user["last_robbery"] = None
+            return "🏦 В казне недостаточно средств!"
+        
+        stolen = random.randint(1000, max_steal)
+        TREASURY -= stolen
+        user["balance"] += stolen
+        user["robbery_success"] = user.get("robbery_success", 0) + 1
+        user["earned"] += stolen
+        user["exp"] = user.get("exp", 0) + random.randint(50, 200)
+        save_db()
+        
+        return (
+            f"🦹 *Ограбление казны!*\n\n"
+            f"🎯 Шанс: {success_chance}%\n"
+            f"✅ *Успех!*\n"
+            f"💰 Украдено: `{stolen:,}` 🪙\n"
+            f"💳 Баланс: `{user['balance']:,}` 🪙\n"
+            f"🏦 В казне осталось: `{TREASURY:,}` 🪙"
+        )
+    else:
+        penalty = max(int(user["balance"] * 0.1), 100)
+        user["balance"] -= penalty
+        TREASURY += penalty
+        user["robbery_fail"] = user.get("robbery_fail", 0) + 1
+        save_db()
+        
+        return (
+            f"🦹 *Ограбление казны!*\n\n"
+            f"🎯 Шанс: {success_chance}%\n"
+            f"❌ *Провал!*\n"
+            f"👮 Штраф: `{penalty:,}` 🪙\n"
+            f"💳 Баланс: `{user['balance']:,}` 🪙\n"
+            f"🏦 В казне: `{TREASURY:,}` 🪙"
+        )
+
 async def start(update, context):
     u = update.effective_user
     uid = str(u.id)
@@ -126,7 +195,10 @@ async def start(update, context):
     ]
     if is_admin(uid):
         kb.append([InlineKeyboardButton("⚙️ Админ", callback_data="a")])
-    await update.message.reply_text(f"🎰 Lucky Casino\n\nПривет, {u.first_name}!", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text(
+        f"🎰 Lucky Casino\n\nПривет, {u.first_name}!\n💰 Баланс сохранен\n🏦 В казне: {TREASURY:,} 🪙\n\nНапишите \"ограбить казну\" для ограбления!",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
 
 async def buttons(update, context):
     q = update.callback_query
@@ -150,7 +222,9 @@ async def buttons(update, context):
         txt += f"💸 Налог: {user['tax_balance']:,}/{user['tax_limit']:,} 🪙\n"
         txt += f"🏋 Энергия: {user.get('energy', 10)}\n👑 Рейтинг: {user.get('rating', 0)}\n"
         txt += f"🌟 Опыт: {fm(user.get('exp', 0))}\n🎲 Игр: {user['games']}\n"
-        txt += f"🎁 Кейсов: {user['cases_opened']}\n🏪 Бизнес: {'✅' if user['business'] else '❌'}\n"
+        txt += f"🎁 Кейсов: {user['cases_opened']}\n"
+        txt += f"🦹 Ограблений: {user.get('robbery_success', 0)}/{user.get('robbery_fail', 0) + user.get('robbery_success', 0)}\n"
+        txt += f"🏪 Бизнес: {'✅' if user['business'] else '❌'}\n"
         txt += f"🖥 Видеокарт: {info['cards']} шт.\n💷 Доход: {info['total']:,} 🪙/час\n"
         txt += f"\n💚 Заработано: {fm(user['earned'])} 🪙\n💔 Проиграно: {fm(user['lost'])} 🪙\n"
         txt += f"\n📅 Регистрация:\n{user['reg_date']}"
@@ -197,7 +271,7 @@ async def buttons(update, context):
     
     elif d == "cs":
         kb = [[InlineKeyboardButton(f"📦 Обычный - {CASES['common']['price']:,}🪙", callback_data="oc")], [InlineKeyboardButton(f"🎁 Редкий - {CASES['rare']['price']:,}🪙", callback_data="or")], [InlineKeyboardButton(f"💎 Эпический - {CASES['epic']['price']:,}🪙", callback_data="oe")], [InlineKeyboardButton(f"👑 Легендарный - {CASES['legendary']['price']:,}🪙", callback_data="ol")], [InlineKeyboardButton("↩️ Назад", callback_data="mn")]]
-        await q.edit_message_text("🎁 Кейсы\n\nВыберите:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(f"🎁 Кейсы\n🏦 В казне: {TREASURY:,} 🪙\n\nВыберите:", reply_markup=InlineKeyboardMarkup(kb))
     
     elif d in ["oc", "or", "oe", "ol"]:
         ct = {"oc": "common", "or": "rare", "oe": "epic", "ol": "legendary"}[d]
@@ -213,6 +287,10 @@ async def buttons(update, context):
         user["cases_opened"] += 1
         user["earned"] += reward
         user["exp"] = user.get("exp", 0) + random.randint(10, 100)
+        global TREASURY
+        TREASURY += int(case["price"] * 0.1)
+        if TREASURY > TREASURY_LIMIT:
+            TREASURY = TREASURY_LIMIT
         save_db()
         txt = f"🎁 {case['name']}\n\n💵 Цена: {case['price']:,} 🪙\n🎉 Выигрыш: {reward:,} 🪙\n💰 Баланс: {user['balance']:,} 🪙"
         if reward == case["rewards"][-1]:
@@ -235,7 +313,7 @@ async def buttons(update, context):
         if not user["vip"]:
             kb.append([InlineKeyboardButton("Купить - 200,000🪙", callback_data="bv")])
         kb.append([InlineKeyboardButton("↩️ Назад", callback_data="s")])
-        await q.edit_message_text(f"💎 VIP\n\n💵 200,000 🪙\n💰 x2 выигрыши\n{'✅ Активен' if user['vip'] else '❌'}", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(f"💎 VIP\n\n💵 200,000 🪙\n💰 x2 выигрыши\n+15% к шансу ограбления\n{'✅ Активен' if user['vip'] else '❌'}", reply_markup=InlineKeyboardMarkup(kb))
     
     elif d == "bb":
         if not user["business"] and user["balance"] >= 100000:
@@ -292,9 +370,13 @@ async def buttons(update, context):
     elif d == "a":
         if not admin:
             return
-        txt = f"⚙️ Админ\n\n👥 {len(DB)} чел.\n💰 {sum(u['balance'] for u in DB.values()):,} 🪙"
-        kb = [[InlineKeyboardButton("👥 Список", callback_data="au")], [InlineKeyboardButton("💰 Выдать", callback_data="ag")], [InlineKeyboardButton("🔄 Сброс", callback_data="ar")], [InlineKeyboardButton("📢 Рассылка", callback_data="as")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]
+        txt = f"⚙️ Админ\n\n👥 {len(DB)} чел.\n💰 Общий: {sum(u['balance'] for u in DB.values()):,} 🪙\n🏦 Казна: {TREASURY:,} 🪙"
+        kb = [[InlineKeyboardButton("👥 Список", callback_data="au")], [InlineKeyboardButton("💰 Выдать", callback_data="ag")], [InlineKeyboardButton("🏦 Пополнить казну", callback_data="at")], [InlineKeyboardButton("🔄 Сброс", callback_data="ar")], [InlineKeyboardButton("📢 Рассылка", callback_data="as")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]
         await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+    
+    elif d == "at" and admin:
+        context.user_data["action"] = "treasury"
+        await q.edit_message_text("🏦 Сумма для казны:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Отмена", callback_data="a")]]))
     
     elif d == "au" and admin:
         txt = "👥 Игроки:\n\n"
@@ -324,15 +406,31 @@ async def buttons(update, context):
         await q.edit_message_text("📢 Сообщение для всех:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Отмена", callback_data="a")]]))
     
     elif d == "mn":
-        kb = [[InlineKeyboardButton("👤 Профиль", callback_data="p")], [InlineKeyboardButton("🎰 Казино", callback_data="c")], [InlineKeyboardButton("⛏ Майнинг", callback_data="m")], [InlineKeyboardButton("🎁 Кейсы", callback_data="cs")], [InlineKeyboardButton("🛍 Магазин", callback_data="s")], [InlineKeyboardButton("🎁 Бонус", callback_data="d")], [InlineKeyboardButton("🏆 Топ", callback_data="t")]]
+        kb = [
+            [InlineKeyboardButton("👤 Профиль", callback_data="p")],
+            [InlineKeyboardButton("🎰 Казино", callback_data="c")],
+            [InlineKeyboardButton("⛏ Майнинг", callback_data="m")],
+            [InlineKeyboardButton("🎁 Кейсы", callback_data="cs")],
+            [InlineKeyboardButton("🛍 Магазин", callback_data="s")],
+            [InlineKeyboardButton("🎁 Бонус", callback_data="d")],
+            [InlineKeyboardButton("🏆 Топ", callback_data="t")],
+        ]
         if admin:
             kb.append([InlineKeyboardButton("⚙️ Админ", callback_data="a")])
-        await q.edit_message_text("🎰 Меню", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(f"🎰 Меню\n🏦 В казне: {TREASURY:,} 🪙\n\nНапишите \"ограбить казну\"!", reply_markup=InlineKeyboardMarkup(kb))
 
 async def messages(update, context):
     uid = str(update.message.from_user.id)
     user = get_user(uid, update.message.from_user.first_name)
     admin = is_admin(uid)
+    global TREASURY
+    text = update.message.text.strip().lower()
+    
+    # Проверка на ограбление казны
+    if text in ["ограбить казну", "ограбление казны", "ограбить"]:
+        result = try_robbery(user)
+        await update.message.reply_text(result, parse_mode='Markdown')
+        return
     
     if admin and context.user_data.get("action"):
         act = context.user_data["action"]
@@ -340,7 +438,7 @@ async def messages(update, context):
             target = context.user_data.get("target")
             if target and target in DB:
                 try:
-                    amount = int(update.message.text.strip())
+                    amount = int(text)
                     if amount > 0:
                         DB[target]["balance"] += amount
                         save_db()
@@ -350,72 +448,7 @@ async def messages(update, context):
             context.user_data["action"] = None
             return
         elif act == "send":
-            txt = update.message.text
             ok = 0
             for u in DB:
                 try:
-                    await context.bot.send_message(chat_id=int(u), text=f"📢 {txt}")
-                    ok += 1
-                except:
-                    pass
-            await update.message.reply_text(f"✅ Отправлено: {ok}")
-            context.user_data["action"] = None
-            return
-    
-    if not user.get("current_game"):
-        return
-    
-    try:
-        bet = int(update.message.text.strip())
-    except:
-        await update.message.reply_text("❌ Число!")
-        return
-    
-    if bet < 1 or bet > user["balance"]:
-        await update.message.reply_text(f"❌ Неверно!\n💰 {user['balance']:,} 🪙")
-        return
-    
-    vip = 2 if user["vip"] else 1
-    game = user["current_game"]
-    win = 0
-    
-    if game == "gc":
-        coin = random.choice(["Орёл", "Решка"])
-        win = bet * 2 * vip if random.random() < 0.5 else 0
-        msg = f"🪙 {coin}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,} 🪙"
-    elif game == "gd":
-        d1, d2 = random.randint(1,6), random.randint(1,6)
-        t = d1 + d2
-        win = bet * 2 * vip if t % 2 == 0 else 0
-        msg = f"🎲 {d1}+{d2}={t}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,} 🪙"
-    else:
-        s = random.choices(["🍒","🍋","🍊","7️⃣","💎","⭐"], k=3)
-        if s[0] == s[1] == s[2]:
-            win = bet * 5 * vip
-        elif s[0] == s[1] or s[1] == s[2] or s[0] == s[2]:
-            win = bet * 2 * vip
-        msg = f"🎰 {' '.join(s)}\n" + ("✅ +" if win > 0 else "❌ -") + f"{abs(win-bet):,} 🪙"
-    
-    user["balance"] += win - bet
-    user["games"] += 1
-    user["exp"] = user.get("exp", 0) + random.randint(5, 50)
-    if win > 0:
-        user["earned"] += win - bet
-    else:
-        user["lost"] += bet
-    user["current_game"] = None
-    save_db()
-    
-    await update.message.reply_text(f"{msg}\n💰 {user['balance']:,} 🪙", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎰 Играть", callback_data="c")], [InlineKeyboardButton("↩️ Меню", callback_data="mn")]]))
-
-def main():
-    load_db()
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages))
-    save_db()
-    app.run_polling(drop_pending_updates=True)
-
-if __name__ == "__main__":
-    main()
+                    await context.bot.send_m
